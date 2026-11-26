@@ -34,6 +34,7 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
         void onViewPoster(@NonNull PosterFileItem item);
         void onSharePoster(@NonNull PosterFileItem item);
         void onRegeneratePoster(@NonNull PosterFileItem item);
+        void onDeletePoster(@NonNull PosterFileItem item);
     }
 
     private final List<PosterFileItem> items = new ArrayList<>();
@@ -96,6 +97,7 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
         private final Button btnView;
         private final Button btnShare;
         private final Button btnRegenerate;
+        private final Button btnDelete;
 
         PosterViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -106,6 +108,7 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
             btnView = itemView.findViewById(R.id.btnPosterView);
             btnShare = itemView.findViewById(R.id.btnPosterShare);
             btnRegenerate = itemView.findViewById(R.id.btnPosterRegenerate);
+            btnDelete = itemView.findViewById(R.id.btnPosterDelete);
         }
 
         void bind(
@@ -123,7 +126,10 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
                             ? R.color.blue_primary
                             : R.color.green_primary
             ));
-            tvMeta.setText("Date: " + item.getRecordDate() + "  ·  TXT: " + item.getSourceTxtFile());
+            String timePart = (item.getLinkedRecord() != null && !item.getLinkedRecord().getTime().isEmpty())
+                    ? " · " + item.getLinkedRecord().getTime()
+                    : "";
+            tvMeta.setText("Date: " + item.getRecordDate() + timePart + "  ·  TXT: " + item.getSourceTxtFile());
 
             String key = item.getFileUri().toString();
             ivThumb.setTag(key);
@@ -151,6 +157,7 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
             btnView.setOnClickListener(v -> listener.onViewPoster(item));
             btnShare.setOnClickListener(v -> listener.onSharePoster(item));
             btnRegenerate.setOnClickListener(v -> listener.onRegeneratePoster(item));
+            btnDelete.setOnClickListener(v -> listener.onDeletePoster(item));
         }
 
         private static Bitmap decodeThumbnail(@NonNull Context context, @NonNull Uri uri) {
@@ -159,7 +166,7 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
                     return null;
                 }
                 BitmapFactory.Options opts = new BitmapFactory.Options();
-                opts.inSampleSize = 4; // 1440x1080 -> 360x270 thumbnail
+                opts.inSampleSize = 4; // 1440x1920 -> 360x480 portrait thumbnail
                 opts.inPreferredConfig = Bitmap.Config.RGB_565;
                 return BitmapFactory.decodeStream(in, null, opts);
             } catch (Exception e) {

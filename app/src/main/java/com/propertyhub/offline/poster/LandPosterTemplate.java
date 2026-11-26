@@ -8,13 +8,23 @@ import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.text.StaticLayout;
 import android.text.TextPaint;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.propertyhub.offline.model.PropertyFieldValue;
 import com.propertyhub.offline.model.PropertyRecord;
 
+import java.util.List;
+
+/**
+ * 1440x1920 (3:4 Portrait) Land for Sale Poster Template.
+ * Distinct Green + White surveyor composition with double border, location pin contour header,
+ * stepped emerald-trimmed Title banner, surveyed parcel plot showcase, adaptive 1/2-column dynamic cards
+ * (omitting any empty fields), and shield-badge Contact card.
+ */
 public final class LandPosterTemplate {
 
     private LandPosterTemplate() {
@@ -31,29 +41,36 @@ public final class LandPosterTemplate {
         int forestGreen = theme.getPrimaryColor();
         int emeraldAccent = theme.getSecondaryAccentColor();
         int softMint = theme.getSoftSurfaceColor();
+        int cardBorder = theme.getCardBorderColor();
 
         Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
         Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
 
-        DynamicPosterLayoutEngine.LayoutPlan layout = DynamicPosterLayoutEngine.solveLayout(
+        List<PropertyFieldValue> visibleFields = record.getPosterVisibleFieldValues();
+
+        DynamicPosterLayoutEngine.PortraitLayoutPlan layout = DynamicPosterLayoutEngine.solvePortraitLayout(
                 theme,
-                record.getDetails(),
+                record.getTitle(),
+                visibleFields,
+                titleTypeface,
                 paragraphTypeface,
                 width,
-                height
+                height,
+                true,
+                false
         );
 
-        // 1. Crisp White Background & Double Surveyor Outer Border with Corner Brackets
+        // 1. Crisp White Background & Double Surveyor Outer Border
         canvas.drawColor(theme.getCanvasBackgroundColor());
         drawLandSurveyOuterBorder(canvas, layout.getOuterRect(), theme.getOuterBorderRadius(), forestGreen, emeraldAccent);
 
-        // 2. Top Location Pin + Surveyed Contour Arcs & Horizon Boundary Stakes Header
+        // 2. Top Location Pin + Surveyed Contour Header Emblem
         drawTopLandHeaderEmblem(canvas, layout.getHeaderRect(), forestGreen, emeraldAccent);
 
         Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         fillPaint.setStyle(Paint.Style.FILL);
 
-        // 3. Architectural Forest Green Title Card ("জমি বিক্রি করা হবে") — FIXED Font Size
+        // 3. Architectural Forest Green Title Banner (Editable Title in title.ttf)
         RectF titleRect = layout.getTitleRect();
         fillPaint.setColor(forestGreen);
         canvas.drawRoundRect(
@@ -63,9 +80,8 @@ public final class LandPosterTemplate {
                 fillPaint
         );
 
-        // Top and bottom emerald framing strips + diamond survey accents inside Title Card
         fillPaint.setColor(emeraldAccent);
-        float stripWidth = Math.min(460f, titleRect.width() * 0.36f);
+        float stripWidth = Math.min(480f, titleRect.width() * 0.38f);
         float stripLeft = titleRect.centerX() - stripWidth / 2f;
         canvas.drawRoundRect(
                 new RectF(stripLeft, titleRect.top + 8f, stripLeft + stripWidth, titleRect.top + 14f),
@@ -76,83 +92,22 @@ public final class LandPosterTemplate {
                 3f, 3f, fillPaint
         );
 
-        drawDiamondMarker(canvas, titleRect.left + 72f, titleRect.centerY(), 15f, emeraldAccent, Color.WHITE);
-        drawDiamondMarker(canvas, titleRect.right - 72f, titleRect.centerY(), 15f, emeraldAccent, Color.WHITE);
+        drawDiamondMarker(canvas, titleRect.left + 64f, titleRect.centerY(), 14f, emeraldAccent, Color.WHITE);
+        drawDiamondMarker(canvas, titleRect.right - 64f, titleRect.centerY(), 14f, emeraldAccent, Color.WHITE);
 
-        TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        titlePaint.setColor(Color.WHITE);
-        titlePaint.setTypeface(titleTypeface);
-        titlePaint.setTextAlign(Paint.Align.CENTER);
-        titlePaint.setTextSize(theme.getFixedTitleFontSizePx());
-        Paint.FontMetrics titleFm = titlePaint.getFontMetrics();
-        float titleBaseline = titleRect.centerY() - (titleFm.ascent + titleFm.descent) / 2f;
-        canvas.drawText(theme.getTitleText(), titleRect.centerX(), titleBaseline, titlePaint);
-
-        // 4. Dynamic Details Card with Mint Left Plot Zone, Surveyor Corners & Meridian Divider
-        RectF detailsCard = layout.getDetailsCardRect();
-        float detailsRadius = theme.getDetailsCornerRadius();
-
-        fillPaint.setColor(Color.WHITE);
-        canvas.drawRoundRect(detailsCard, detailsRadius, detailsRadius, fillPaint);
-
-        // Subtle Mint tint inside Left Illustration Pane (clipped cleanly to Details Card shape)
+        StaticLayout titleLayout = layout.getTitleLayout();
         canvas.save();
-        Path cardClip = new Path();
-        cardClip.addRoundRect(detailsCard, detailsRadius, detailsRadius, Path.Direction.CW);
-        canvas.clipPath(cardClip);
-        fillPaint.setColor(softMint);
-        canvas.drawRect(detailsCard.left, detailsCard.top, layout.getDividerX(), detailsCard.bottom, fillPaint);
+        float titleTextLeft = titleRect.centerX() - titleLayout.getWidth() / 2f;
+        float titleTextTop = titleRect.centerY() - titleLayout.getHeight() / 2f;
+        canvas.translate(titleTextLeft, titleTextTop);
+        titleLayout.draw(canvas);
         canvas.restore();
 
-        // Card Outline
-        Paint cardBorder = new Paint(Paint.ANTI_ALIAS_FLAG);
-        cardBorder.setColor(forestGreen);
-        cardBorder.setStyle(Paint.Style.STROKE);
-        cardBorder.setStrokeWidth(5.5f);
-        canvas.drawRoundRect(detailsCard, detailsRadius, detailsRadius, cardBorder);
+        // 4. Surveyed Land Parcel Panorama Showcase + Adaptive Multi-Field Cards
+        drawLandShowcaseStrip(canvas, layout.getShowcaseRect(), forestGreen, emeraldAccent, softMint, cardBorder);
+        drawLandFieldCards(canvas, layout, forestGreen, emeraldAccent, softMint, cardBorder);
 
-        // Subtle inner emerald L-corner surveyor ticks on the right text side
-        drawRightCornerBrackets(canvas, detailsCard, emeraldAccent);
-
-        // Left Surveyed Land Parcel + Location Pin + Trees Illustration
-        drawDetailsCardLandIllustration(
-                canvas,
-                detailsCard,
-                layout.getDividerX(),
-                forestGreen,
-                emeraldAccent
-        );
-
-        // Meridian Vertical Divider with top/bottom emerald diamond anchor dots
-        float dividerX = layout.getDividerX();
-        float dividerInset = Math.min(34f, detailsCard.height() * 0.12f);
-        Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dividerPaint.setColor(forestGreen);
-        dividerPaint.setStrokeWidth(4.5f);
-        dividerPaint.setStrokeCap(Paint.Cap.ROUND);
-        canvas.drawLine(
-                dividerX,
-                detailsCard.top + dividerInset,
-                dividerX,
-                detailsCard.bottom - dividerInset,
-                dividerPaint
-        );
-        drawDiamondMarker(canvas, dividerX, detailsCard.top + dividerInset, 7.5f, emeraldAccent, Color.WHITE);
-        drawDiamondMarker(canvas, dividerX, detailsCard.bottom - dividerInset, 7.5f, emeraldAccent, Color.WHITE);
-
-        // Right Dynamic Details Paragraphs (paragraph.ttf + Bold/Italic Markdown)
-        RectF textRect = layout.getDetailsTextRect();
-        PosterTextFitter.drawFitResult(
-                canvas,
-                layout.getDetailsFit(),
-                textRect.left,
-                textRect.top,
-                Math.round(textRect.width()),
-                Math.round(textRect.height()),
-                !layout.isOverflowed()
-        );
-
-        // 5. Bottom Framed Forest Green Contact Card + Rounded-Square Phone Badge + Fixed Mobile Number
+        // 5. Bottom Emerald-Trimmed Forest Green Contact Card + Shield Badge
         RectF contactRect = layout.getContactRect();
         fillPaint.setColor(forestGreen);
         canvas.drawRoundRect(
@@ -162,16 +117,14 @@ public final class LandPosterTemplate {
                 fillPaint
         );
 
-        // Crisp emerald top edge trim bar inside Contact Card
         fillPaint.setColor(emeraldAccent);
         canvas.drawRoundRect(
-                new RectF(contactRect.left + 260f, contactRect.top + 8f, contactRect.right - 64f, contactRect.top + 13f),
+                new RectF(contactRect.left + 250f, contactRect.top + 8f, contactRect.right - 60f, contactRect.top + 13f),
                 2.5f, 2.5f, fillPaint
         );
 
-        // Rounded-Square Shield White Phone Badge (distinct from House's circle)
-        float badgeSize = Math.min(116f, contactRect.height() * 0.68f);
-        float badgeCx = contactRect.left + 108f;
+        float badgeSize = Math.min(108f, contactRect.height() * 0.68f);
+        float badgeCx = contactRect.left + 106f;
         float badgeCy = contactRect.centerY();
         RectF badgeRect = new RectF(
                 badgeCx - badgeSize / 2f,
@@ -193,11 +146,12 @@ public final class LandPosterTemplate {
 
         drawGreenHandsetIcon(canvas, badgeCx, badgeCy, badgeSize * 0.50f, forestGreen);
 
-        // Dual Emerald/White Divider inside Contact Card
-        float contactDividerX = contactRect.left + 206f;
-        float contactDividerInset = Math.min(28f, contactRect.height() * 0.16f);
+        Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         dividerPaint.setColor(Color.parseColor("#A7F3D0"));
         dividerPaint.setStrokeWidth(4.5f);
+        dividerPaint.setStrokeCap(Paint.Cap.ROUND);
+        float contactDividerX = contactRect.left + 196f;
+        float contactDividerInset = contactRect.height() * 0.22f;
         canvas.drawLine(
                 contactDividerX,
                 contactRect.top + contactDividerInset,
@@ -206,17 +160,24 @@ public final class LandPosterTemplate {
                 dividerPaint
         );
 
-        // Fixed Contact Font Size ("যোগাযোগ: " + exact mobile number)
         String contactLine = theme.getContactPrefix() + record.getMobile();
-        float mobileAreaLeft = contactDividerX + 30f;
-        float mobileAreaRight = contactRect.right - 36f;
+        float mobileAreaLeft = contactDividerX + 26f;
+        float mobileAreaRight = contactRect.right - 34f;
         float mobileAreaWidth = mobileAreaRight - mobileAreaLeft;
 
         TextPaint mobilePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mobilePaint.setColor(Color.WHITE);
-        mobilePaint.setTypeface(paragraphTypeface);
+        mobilePaint.setTypeface(Typeface.create(paragraphTypeface, Typeface.BOLD));
+        mobilePaint.setFakeBoldText(true);
         mobilePaint.setTextAlign(Paint.Align.CENTER);
-        mobilePaint.setTextSize(theme.getFixedContactFontSizePx());
+        float fittedContactSize = PosterTextFitter.fitSingleLineTextSize(
+                contactLine,
+                mobilePaint,
+                mobileAreaWidth - 16f,
+                theme.getFixedContactFontSizePx(),
+                PosterThemeConfig.MIN_CONTACT_FONT_SIZE_PX
+        );
+        mobilePaint.setTextSize(fittedContactSize);
         Paint.FontMetrics mobileFm = mobilePaint.getFontMetrics();
         float mobileBaseline = contactRect.centerY() - (mobileFm.ascent + mobileFm.descent) / 2f;
         canvas.drawText(
@@ -227,6 +188,110 @@ public final class LandPosterTemplate {
         );
 
         return layout.isOverflowed();
+    }
+
+    private static void drawLandShowcaseStrip(
+            @NonNull Canvas canvas,
+            @NonNull RectF showcaseRect,
+            int forestGreen,
+            int emeraldAccent,
+            int softMint,
+            int cardBorder
+    ) {
+        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fill.setStyle(Paint.Style.FILL);
+        fill.setColor(softMint);
+        canvas.drawRoundRect(showcaseRect, 24f, 24f, fill);
+
+        Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        stroke.setStyle(Paint.Style.STROKE);
+        stroke.setColor(forestGreen);
+        stroke.setStrokeWidth(4f);
+        canvas.drawRoundRect(showcaseRect, 24f, 24f, stroke);
+
+        drawRightCornerBrackets(canvas, showcaseRect, emeraldAccent);
+
+        // Decorative dashed surveyor contour lines flanking centered Land Parcel Plot graphic
+        Paint dash = new Paint(Paint.ANTI_ALIAS_FLAG);
+        dash.setColor(emeraldAccent);
+        dash.setAlpha(110);
+        dash.setStyle(Paint.Style.STROKE);
+        dash.setStrokeWidth(3f);
+        dash.setPathEffect(new DashPathEffect(new float[]{12f, 10f}, 0f));
+
+        float midY = showcaseRect.centerY();
+        canvas.drawLine(showcaseRect.left + 44f, midY - 14f, showcaseRect.centerX() - 185f, midY - 14f, dash);
+        canvas.drawLine(showcaseRect.centerX() + 185f, midY - 14f, showcaseRect.right - 44f, midY - 14f, dash);
+        canvas.drawLine(showcaseRect.left + 76f, midY + 18f, showcaseRect.centerX() - 185f, midY + 18f, dash);
+        canvas.drawLine(showcaseRect.centerX() + 185f, midY + 18f, showcaseRect.right - 76f, midY + 18f, dash);
+
+        drawLandParcelIllustration(canvas, showcaseRect, forestGreen, emeraldAccent);
+    }
+
+    private static void drawLandFieldCards(
+            @NonNull Canvas canvas,
+            @NonNull DynamicPosterLayoutEngine.PortraitLayoutPlan layout,
+            int forestGreen,
+            int emeraldAccent,
+            int softMint,
+            int cardBorder
+    ) {
+        Paint cardFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        cardFill.setStyle(Paint.Style.FILL);
+        cardFill.setColor(Color.WHITE);
+
+        Paint softHeaderTint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        softHeaderTint.setStyle(Paint.Style.FILL);
+        softHeaderTint.setColor(softMint);
+
+        Paint cardStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        cardStroke.setStyle(Paint.Style.STROKE);
+        cardStroke.setColor(forestGreen);
+        cardStroke.setAlpha(185);
+        cardStroke.setStrokeWidth(3.5f);
+
+        Paint emeraldStripe = new Paint(Paint.ANTI_ALIAS_FLAG);
+        emeraldStripe.setStyle(Paint.Style.FILL);
+        emeraldStripe.setColor(emeraldAccent);
+
+        for (DynamicPosterLayoutEngine.FieldCardPlacement card : layout.getFieldCards()) {
+            RectF r = card.getCardRect();
+            canvas.drawRoundRect(r, 20f, 20f, cardFill);
+
+            // Soft mint tint behind label header band inside each Land field card
+            RectF labelRect = card.getLabelRect();
+            RectF valueRect = card.getValueRect();
+            float headerBandBottom = Math.min(r.bottom - 8f, labelRect.bottom + 8f);
+            canvas.save();
+            Path clip = new Path();
+            clip.addRoundRect(r, 20f, 20f, Path.Direction.CW);
+            canvas.clipPath(clip);
+            canvas.drawRect(r.left, r.top, r.right, headerBandBottom, softHeaderTint);
+            canvas.restore();
+
+            canvas.drawRoundRect(r, 20f, 20f, cardStroke);
+
+            // Left emerald vertical accent notch
+            canvas.drawRoundRect(
+                    new RectF(r.left + 2f, r.top + 14f, r.left + 10f, r.bottom - 14f),
+                    4f, 4f, emeraldStripe
+            );
+
+            // Small diamond survey marker beside field label
+            drawDiamondMarker(canvas, labelRect.left + 10f, labelRect.centerY(), 8.5f, forestGreen, Color.WHITE);
+
+            canvas.save();
+            canvas.translate(labelRect.left + 28f, labelRect.top);
+            card.getLabelLayout().draw(canvas);
+            canvas.restore();
+
+            // Rich text value (paragraph.ttf + Bold/Italic)
+            canvas.save();
+            canvas.clipRect(valueRect.left - 4f, valueRect.top - 4f, valueRect.right + 4f, r.bottom - 6f);
+            canvas.translate(valueRect.left, valueRect.top);
+            card.getValueLayout().draw(canvas);
+            canvas.restore();
+        }
     }
 
     private static void drawLandSurveyOuterBorder(
@@ -242,7 +307,6 @@ public final class LandPosterTemplate {
         outerStroke.setStrokeWidth(6.5f);
         canvas.drawRoundRect(outerRect, radius, radius, outerStroke);
 
-        // Subtle inner survey frame line
         Paint innerStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
         innerStroke.setColor(emeraldAccent);
         innerStroke.setStyle(Paint.Style.STROKE);
@@ -266,14 +330,12 @@ public final class LandPosterTemplate {
         p.setStyle(Paint.Style.STROKE);
         p.setStrokeWidth(4f);
         p.setStrokeCap(Paint.Cap.ROUND);
-        float inset = 18f;
-        float arm = 22f;
+        float inset = 16f;
+        float arm = 20f;
 
-        // Top-right L bracket
         canvas.drawLine(card.right - inset - arm, card.top + inset, card.right - inset, card.top + inset, p);
         canvas.drawLine(card.right - inset, card.top + inset, card.right - inset, card.top + inset + arm, p);
 
-        // Bottom-right L bracket
         canvas.drawLine(card.right - inset - arm, card.bottom - inset, card.right - inset, card.bottom - inset, p);
         canvas.drawLine(card.right - inset, card.bottom - inset, card.right - inset, card.bottom - inset - arm, p);
     }
@@ -285,7 +347,7 @@ public final class LandPosterTemplate {
             int emeraldAccent
     ) {
         float cx = headerRect.centerX();
-        float bottomY = headerRect.bottom - 6f;
+        float bottomY = headerRect.bottom - 8f;
 
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         fill.setStyle(Paint.Style.FILL);
@@ -294,8 +356,7 @@ public final class LandPosterTemplate {
         stroke.setStyle(Paint.Style.STROKE);
         stroke.setStrokeCap(Paint.Cap.ROUND);
 
-        // Symmetric Horizon Boundary Bars with Diamond Survey Nodes
-        float barY = bottomY - 28f;
+        float barY = bottomY - 34f;
         float innerGap = 158f;
         float barOuter = 540f;
 
@@ -314,7 +375,6 @@ public final class LandPosterTemplate {
         drawDiamondMarker(canvas, cx - barOuter, barY, 7f, emeraldAccent, Color.WHITE);
         drawDiamondMarker(canvas, cx + barOuter, barY, 7f, emeraldAccent, Color.WHITE);
 
-        // Curved Survey Plot Ground Arc below Location Pin
         stroke.setColor(forestGreen);
         stroke.setStrokeWidth(5f);
         Path contourOuter = new Path();
@@ -329,10 +389,9 @@ public final class LandPosterTemplate {
         contourInner.quadTo(cx, bottomY - 16f, cx + 82f, bottomY + 4f);
         canvas.drawPath(contourInner, stroke);
 
-        // Center Prominent Map Location Pin (with white inner ring & emerald dot)
         float pinCx = cx;
-        float pinCircleY = headerRect.top + 38f;
-        float pinRadius = 29f;
+        float pinCircleY = headerRect.top + 48f;
+        float pinRadius = 31f;
         float pinTipY = bottomY - 14f;
 
         Path pinBody = new Path();
@@ -352,22 +411,19 @@ public final class LandPosterTemplate {
         canvas.drawCircle(pinCx, pinCircleY, 7.5f, fill);
     }
 
-    private static void drawDetailsCardLandIllustration(
+    private static void drawLandParcelIllustration(
             @NonNull Canvas canvas,
-            @NonNull RectF card,
-            float dividerX,
+            @NonNull RectF showcaseRect,
             int forestGreen,
             int emeraldAccent
     ) {
-        float paneWidth = dividerX - card.left;
-        // Normalized coordinate space width=290, height=300 centered around (0,0)
         float scale = Math.min(
-                1.08f,
-                Math.min((paneWidth - 34f) / 292f, (card.height() - 42f) / 302f)
+                0.76f,
+                Math.min((showcaseRect.width() - 40f) / 310f, (showcaseRect.height() - 22f) / 260f)
         );
 
         canvas.save();
-        canvas.translate(card.left + paneWidth / 2f, card.centerY());
+        canvas.translate(showcaseRect.centerX(), showcaseRect.centerY() + 10f);
         canvas.scale(scale, scale);
 
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -378,22 +434,19 @@ public final class LandPosterTemplate {
         stroke.setStrokeCap(Paint.Cap.ROUND);
         stroke.setStrokeJoin(Paint.Join.ROUND);
 
-        // 1. Soft horizon hill contour beneath the land plot
         fill.setColor(forestGreen);
         Path baseArc = new Path();
-        baseArc.moveTo(-136f, 122f);
-        baseArc.quadTo(0f, 96f, 136f, 122f);
-        baseArc.quadTo(0f, 110f, -136f, 122f);
+        baseArc.moveTo(-136f, 114f);
+        baseArc.quadTo(0f, 88f, 136f, 114f);
+        baseArc.quadTo(0f, 102f, -136f, 114f);
         baseArc.close();
         canvas.drawPath(baseArc, fill);
 
-        // 2. Perspective Surveyed Land Parcel (trapezoid grid)
-        // Rear corners (-86, 16) to (86, 16); Front corners (-128, 100) to (128, 100)
         Path plotSurface = new Path();
-        plotSurface.moveTo(-84f, 18f);
-        plotSurface.lineTo(84f, 18f);
-        plotSurface.lineTo(126f, 100f);
-        plotSurface.lineTo(-126f, 100f);
+        plotSurface.moveTo(-84f, 12f);
+        plotSurface.lineTo(84f, 12f);
+        plotSurface.lineTo(126f, 94f);
+        plotSurface.lineTo(-126f, 94f);
         plotSurface.close();
 
         fill.setColor(Color.WHITE);
@@ -402,42 +455,37 @@ public final class LandPosterTemplate {
         fill.setColor(Color.argb(38, 22, 163, 74));
         canvas.drawPath(plotSurface, fill);
 
-        // Internal dashed parcel division grid lines
         Paint dashPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         dashPaint.setColor(emeraldAccent);
         dashPaint.setStyle(Paint.Style.STROKE);
         dashPaint.setStrokeWidth(3f);
         dashPaint.setPathEffect(new DashPathEffect(new float[]{9f, 7f}, 0f));
-        canvas.drawLine(0f, 18f, 0f, 100f, dashPaint);
-        canvas.drawLine(-106f, 58f, 106f, 58f, dashPaint);
+        canvas.drawLine(0f, 12f, 0f, 94f, dashPaint);
+        canvas.drawLine(-106f, 52f, 106f, 52f, dashPaint);
 
-        // Bold Forest Green Land Parcel Perimeter
         stroke.setColor(forestGreen);
         stroke.setStrokeWidth(5.5f);
         canvas.drawPath(plotSurface, stroke);
 
-        // 3. Two Stylized Green Trees behind rear plot corners
-        drawMiniLandTree(canvas, -104f, 20f, 0.92f, forestGreen, emeraldAccent);
-        drawMiniLandTree(canvas, 104f, 20f, 0.85f, forestGreen, emeraldAccent);
+        drawMiniLandTree(canvas, -104f, 14f, 0.90f, forestGreen, emeraldAccent);
+        drawMiniLandTree(canvas, 104f, 14f, 0.85f, forestGreen, emeraldAccent);
 
-        // 4. Four Survey Boundary Corner Stakes on parcel vertices
-        drawBoundaryStake(canvas, -84f, 18f, forestGreen, emeraldAccent);
-        drawBoundaryStake(canvas, 84f, 18f, forestGreen, emeraldAccent);
-        drawBoundaryStake(canvas, -126f, 100f, forestGreen, emeraldAccent);
-        drawBoundaryStake(canvas, 126f, 100f, forestGreen, emeraldAccent);
+        drawBoundaryStake(canvas, -84f, 12f, forestGreen, emeraldAccent);
+        drawBoundaryStake(canvas, 84f, 12f, forestGreen, emeraldAccent);
+        drawBoundaryStake(canvas, -126f, 94f, forestGreen, emeraldAccent);
+        drawBoundaryStake(canvas, 126f, 94f, forestGreen, emeraldAccent);
 
-        // 5. Location Ripple & Map Pin hovering above parcel center
         stroke.setColor(emeraldAccent);
         stroke.setStrokeWidth(3f);
-        canvas.drawOval(new RectF(-38f, 30f, 38f, 56f), stroke);
+        canvas.drawOval(new RectF(-36f, 24f, 36f, 50f), stroke);
 
         float pinCx = 0f;
         float pinCy = -64f;
-        float pinR = 36f;
+        float pinR = 34f;
         Path pin = new Path();
         pin.addCircle(pinCx, pinCy, pinR, Path.Direction.CW);
         pin.moveTo(pinCx - pinR * 0.85f, pinCy + pinR * 0.45f);
-        pin.lineTo(pinCx, 36f);
+        pin.lineTo(pinCx, 30f);
         pin.lineTo(pinCx + pinR * 0.85f, pinCy + pinR * 0.45f);
         pin.close();
 
@@ -445,10 +493,10 @@ public final class LandPosterTemplate {
         canvas.drawPath(pin, fill);
 
         fill.setColor(Color.WHITE);
-        canvas.drawCircle(pinCx, pinCy, 17f, fill);
+        canvas.drawCircle(pinCx, pinCy, 16f, fill);
 
         fill.setColor(emeraldAccent);
-        canvas.drawCircle(pinCx, pinCy, 9f, fill);
+        canvas.drawCircle(pinCx, pinCy, 8.5f, fill);
 
         canvas.restore();
     }

@@ -21,7 +21,6 @@ import android.widget.Toast;
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.IdRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
@@ -30,7 +29,6 @@ import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 
-import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.propertyhub.offline.export.ZipExportManager;
 import com.propertyhub.offline.model.AppThemeMode;
@@ -51,7 +49,11 @@ import java.util.concurrent.Executors;
 public class MainActivity extends AppCompatActivity implements MainHostCallbacks {
 
     private static final long TOP_TOAST_DURATION_MS = 2600L;
-    private static final String STATE_ACTIVE_NAV_ID = "state_active_nav_id";
+    private static final String STATE_ACTIVE_SCREEN = "state_active_screen";
+    private static final int SCREEN_COLLECT = 0;
+    private static final int SCREEN_SETTINGS = 1;
+    private static final int SCREEN_FILES = 2;
+
     private static final String TAG_COLLECT = "tab_collect";
     private static final String TAG_SETTINGS = "tab_settings";
     private static final String TAG_FILES = "tab_files";
@@ -66,7 +68,8 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
     private final ExecutorService hostIoExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    private BottomNavigationView bottomNavigation;
+    private ImageButton btnHeaderFiles;
+    private ImageButton btnHeaderSettings;
     private View storageWarningBanner;
     private TextView tvStorageWarningText;
     private Button btnBannerSelectFolder;
@@ -80,9 +83,7 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
     private AlertDialog storageSetupDialog;
     @Nullable
     private PropertyCategory pendingSubmitCategory;
-    @IdRes
-    private int activeNavId = R.id.nav_collect_data;
-    private boolean suppressNavListener = false;
+    private int activeScreen = SCREEN_COLLECT;
 
     private final ActivityResultLauncher<Intent> directoryPickerLauncher =
             registerForActivityResult(
@@ -115,7 +116,7 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         zipExportManager = new ZipExportManager(this, storageManager);
 
         if (savedInstanceState != null) {
-            activeNavId = savedInstanceState.getInt(STATE_ACTIVE_NAV_ID, R.id.nav_collect_data);
+            activeScreen = savedInstanceState.getInt(STATE_ACTIVE_SCREEN, SCREEN_COLLECT);
         }
 
         bindHeaderAndNavViews();
@@ -133,7 +134,7 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
     @Override
     protected void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
-        outState.putInt(STATE_ACTIVE_NAV_ID, activeNavId);
+        outState.putInt(STATE_ACTIVE_SCREEN, activeScreen);
     }
 
     @Override
@@ -165,8 +166,28 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
     }
 
     private void bindHeaderAndNavViews() {
-        ImageButton btnHeaderSettings = findViewById(R.id.btnHeaderSettings);
-        btnHeaderSettings.setOnClickListener(v -> navigateToNavDestination(R.id.nav_settings));
+        View brandLogo = findViewById(R.id.ivBrandLogo);
+        View headerTitleGroup = findViewById(R.id.headerTitleGroup);
+        brandLogo.setOnClickListener(v -> openHome());
+        headerTitleGroup.setOnClickListener(v -> openHome());
+
+        btnHeaderFiles = findViewById(R.id.btnHeaderFiles);
+        btnHeaderFiles.setOnClickListener(v -> {
+            if (activeScreen == SCREEN_FILES) {
+                openHome();
+            } else {
+                openGeneratedFiles();
+            }
+        });
+
+        btnHeaderSettings = findViewById(R.id.btnHeaderSettings);
+        btnHeaderSettings.setOnClickListener(v -> {
+            if (activeScreen == SCREEN_SETTINGS) {
+                openHome();
+            } else {
+                openSettings();
+            }
+        });
 
         storageWarningBanner = findViewById(R.id.storageWarningBanner);
         tvStorageWarningText = findViewById(R.id.tvStorageWarningText);
@@ -180,15 +201,6 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         topToastCard.setOnClickListener(v -> {
             mainHandler.removeCallbacks(hideTopToastRunnable);
             hideTopToastAnimated();
-        });
-
-        bottomNavigation = findViewById(R.id.bottomNavigation);
-        bottomNavigation.setOnItemSelectedListener(item -> {
-            if (suppressNavListener) {
-                return true;
-            }
-            switchToTab(item.getItemId());
-            return true;
         });
     }
 
@@ -206,16 +218,14 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
                     .add(R.id.fragmentContainer, filesFragment, TAG_FILES)
                     .hide(filesFragment)
                     .commit();
+            activeScreen = SCREEN_COLLECT;
+            updateHeaderIconStates();
         } else {
-            switchToTab(activeNavId);
+            switchToScreen(activeScreen);
         }
-
-        suppressNavListener = true;
-        bottomNavigation.setSelectedItemId(activeNavId);
-        suppressNavListener = false;
     }
 
-    private void switchToTab(@IdRes int menuId) {
+    private void switchToScreen(int screen) {
         FragmentManager fm = getSupportFragmentManager();
         Fragment collect = fm.findFragmentByTag(TAG_COLLECT);
         Fragment settings = fm.findFragmentByTag(TAG_SETTINGS);
@@ -223,33 +233,43 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
 
         FragmentTransaction tx = fm.beginTransaction();
         if (collect != null) {
-            if (menuId == R.id.nav_collect_data) {
+            if (screen == SCREEN_COLLECT) {
                 tx.show(collect);
             } else {
                 tx.hide(collect);
             }
         }
         if (settings != null) {
-            if (menuId == R.id.nav_settings) {
+            if (screen == SCREEN_SETTINGS) {
                 tx.show(settings);
             } else {
                 tx.hide(settings);
             }
         }
         if (files != null) {
-            if (menuId == R.id.nav_generated_files) {
+            if (screen == SCREEN_FILES) {
                 tx.show(files);
             } else {
                 tx.hide(files);
             }
         }
         tx.commitAllowingStateLoss();
-        activeNavId = menuId;
+        activeScreen = screen;
+        updateHeaderIconStates();
 
-        if (menuId == R.id.nav_settings && settings instanceof SettingsFragment) {
+        if (screen == SCREEN_SETTINGS && settings instanceof SettingsFragment) {
             ((SettingsFragment) settings).refreshUi();
-        } else if (menuId == R.id.nav_generated_files && files instanceof GeneratedFilesFragment) {
+        } else if (screen == SCREEN_FILES && files instanceof GeneratedFilesFragment) {
             ((GeneratedFilesFragment) files).refreshAllData();
+        }
+    }
+
+    private void updateHeaderIconStates() {
+        if (btnHeaderFiles != null) {
+            btnHeaderFiles.setAlpha(activeScreen == SCREEN_FILES ? 1.0f : 0.85f);
+        }
+        if (btnHeaderSettings != null) {
+            btnHeaderSettings.setAlpha(activeScreen == SCREEN_SETTINGS ? 1.0f : 0.85f);
         }
     }
 
@@ -257,8 +277,8 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (activeNavId != R.id.nav_collect_data) {
-                    navigateToNavDestination(R.id.nav_collect_data);
+                if (activeScreen != SCREEN_COLLECT) {
+                    openHome();
                 } else {
                     setEnabled(false);
                     getOnBackPressedDispatcher().onBackPressed();
@@ -368,12 +388,18 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
     }
 
     @Override
-    public void navigateToNavDestination(@IdRes int navMenuItemId) {
-        if (bottomNavigation != null) {
-            bottomNavigation.setSelectedItemId(navMenuItemId);
-        } else {
-            switchToTab(navMenuItemId);
-        }
+    public void openHome() {
+        switchToScreen(SCREEN_COLLECT);
+    }
+
+    @Override
+    public void openSettings() {
+        switchToScreen(SCREEN_SETTINGS);
+    }
+
+    @Override
+    public void openGeneratedFiles() {
+        switchToScreen(SCREEN_FILES);
     }
 
     @Override

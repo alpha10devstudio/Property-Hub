@@ -15,7 +15,7 @@ import java.io.ByteArrayOutputStream;
 public class PosterRenderer {
 
     public static final int POSTER_WIDTH = 1440;
-    public static final int POSTER_HEIGHT = 1080;
+    public static final int POSTER_HEIGHT = 1920;
     public static final int JPEG_QUALITY = 92;
 
     @Nullable
@@ -43,7 +43,7 @@ public class PosterRenderer {
                 overflowed = LandPosterTemplate.render(appContext, canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
             }
 
-            ByteArrayOutputStream out = new ByteArrayOutputStream(256 * 1024);
+            ByteArrayOutputStream out = new ByteArrayOutputStream(384 * 1024);
             boolean compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out);
             if (!compressed) {
                 return PosterRenderResult.error("JPEG compression failed.");

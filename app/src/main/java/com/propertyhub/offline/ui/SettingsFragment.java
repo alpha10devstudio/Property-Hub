@@ -73,13 +73,13 @@ public class SettingsFragment extends Fragment {
 
         btnBackArrow.setOnClickListener(v -> {
             if (host != null) {
-                host.navigateToNavDestination(R.id.nav_collect_data);
+                host.openHome();
             }
         });
 
         btnBackHome.setOnClickListener(v -> {
             if (host != null) {
-                host.navigateToNavDestination(R.id.nav_collect_data);
+                host.openHome();
             }
         });
 

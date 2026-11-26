@@ -10,6 +10,8 @@
     <string name="nav_generated_files">Generated Files</string>
 
     <!-- Collect Data Screen -->
+    <string name="tab_house_for_rent">House for Rent</string>
+    <string name="tab_land_for_sale">Land for Sale</string>
     <string name="house_for_rent_title">HOUSE FOR RENT</string>
     <string name="house_for_rent_subtitle">Find the right tenant</string>
     <string name="land_for_sale_title">LAND FOR SALE</string>
@@ -25,6 +27,8 @@
     <string name="submit_house_for_rent">Submit House for Rent</string>
     <string name="submit_land_for_sale">Submit Land for Sale</string>
     <string name="saving_record">Saving…</string>
+    <string name="saving_and_generating">Saving &amp; Generating Poster…</string>
+    <string name="delete_poster">Delete</string>
 
     <!-- SAF Banner & Dialog -->
     <string name="storage_banner_missing">Folder access is needed to save TXT records and posters offline.</string>
@@ -57,7 +61,7 @@
     <string name="tab_posters">Posters</string>
     <string name="tab_zip_exports">ZIP Exports</string>
     <string name="bulk_generator_title">Bulk Poster Generator</string>
-    <string name="bulk_generator_subtitle">Generate 4:3 JPG posters from saved TXT records without re-entering data.</string>
+    <string name="bulk_generator_subtitle">Generate 3:4 portrait JPG posters from saved TXT records without re-entering data.</string>
     <string name="start_generation">Start Generation</string>
     <string name="cancel_generation">Cancel</string>
     <string name="retry_failed">Retry Failed</string>

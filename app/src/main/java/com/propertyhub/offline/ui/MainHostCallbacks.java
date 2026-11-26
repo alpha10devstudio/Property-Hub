@@ -1,6 +1,5 @@
 package com.propertyhub.offline.ui;
 
-import androidx.annotation.IdRes;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -40,7 +39,11 @@ public interface MainHostCallbacks {
             boolean isHouseTheme
     );
 
-    void navigateToNavDestination(@IdRes int navMenuItemId);
+    void openHome();
+
+    void openSettings();
+
+    void openGeneratedFiles();
 
     void applyThemeMode(@NonNull AppThemeMode themeMode);
 

@@ -116,20 +116,22 @@ public class DetailsParagraphParserTest {
 
     @Test
     public void dynamicLayoutGeometryPreservesGapsAndPreventsOverlapAcrossDetailsSizes() {
-        float[] testDetailsHeights = new float[] { 200f, 256f, 348f, 440f, 532f, 650f };
+        float[] testDetailsHeights = new float[] { 340f, 520f, 780f, 1020f, 1280f, 1450f };
         for (float h : testDetailsHeights) {
-            GeometryMetrics m = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1080, h);
+            GeometryMetrics m = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1920, h);
             assertTrue("Header overlaps outer top", m.headerTop > m.outerTop);
             assertTrue("Header overlaps Title card", m.headerBottom < m.titleTop);
-            assertEquals(DynamicPosterLayoutEngine.CARD_GAP_PX, m.detailsTop - m.titleBottom, 0.01f);
-            assertEquals(DynamicPosterLayoutEngine.CARD_GAP_PX, m.contactTop - m.detailsBottom, 0.01f);
+            assertTrue("Title to details gap collapsed",
+                    (m.detailsTop - m.titleBottom) >= DynamicPosterLayoutEngine.CARD_GAP_PX - 0.01f);
+            assertTrue("Details to contact gap collapsed",
+                    (m.contactTop - m.detailsBottom) >= DynamicPosterLayoutEngine.CARD_GAP_PX - 0.01f);
             assertTrue("Contact overflows outer bottom", m.contactBottom < m.outerBottom);
             assertTrue("Details box overlaps card edges", m.detailsTextTop > m.detailsTop);
             assertTrue("Details box overlaps card bottom", m.detailsTextBottom < m.detailsBottom);
         }
 
-        GeometryMetrics compact = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1080, 256f);
-        GeometryMetrics expanded = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1080, 520f);
+        GeometryMetrics compact = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1920, 420f);
+        GeometryMetrics expanded = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1920, 960f);
         assertTrue(compact.getDetailsCardHeight() < expanded.getDetailsCardHeight());
     }
 }

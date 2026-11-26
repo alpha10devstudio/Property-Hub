@@ -19,6 +19,7 @@ import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
@@ -77,6 +78,7 @@ public class GeneratedFilesFragment extends Fragment {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final DateTimeProvider dateTimeProvider = new DateTimeProvider();
 
+    private ImageButton btnFilesBackArrow;
     private TabLayout filesTabLayout;
     private View panelRecords;
     private View panelBulkGenerator;
@@ -254,6 +256,7 @@ public class GeneratedFilesFragment extends Fragment {
     }
 
     private void bindViews(@NonNull View view) {
+        btnFilesBackArrow = view.findViewById(R.id.btnFilesBackArrow);
         filesTabLayout = view.findViewById(R.id.filesTabLayout);
         panelRecords = view.findViewById(R.id.panelRecords);
         panelBulkGenerator = view.findViewById(R.id.panelBulkGenerator);
@@ -364,6 +367,11 @@ public class GeneratedFilesFragment extends Fragment {
             public void onRegeneratePoster(@NonNull PosterFileItem item) {
                 confirmAndRegeneratePoster(item);
             }
+
+            @Override
+            public void onDeletePoster(@NonNull PosterFileItem item) {
+                confirmAndDeletePoster(item);
+            }
         });
         rvPosters.setAdapter(postersAdapter);
 
@@ -384,6 +392,12 @@ public class GeneratedFilesFragment extends Fragment {
     }
 
     private void wireListeners() {
+        btnFilesBackArrow.setOnClickListener(v -> {
+            if (host != null) {
+                host.openHome();
+            }
+        });
+
         filesTabLayout.addOnTabSelectedListener(new TabLayout.OnTabSelectedListener() {
             @Override
             public void onTabSelected(TabLayout.Tab tab) {
@@ -818,6 +832,7 @@ public class GeneratedFilesFragment extends Fragment {
         MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(record.getRecordId())
                 .setMessage(message)
+                .setNeutralButton("Delete", (d, w) -> confirmAndDeleteRecord(record))
                 .setNegativeButton("Close", null);
 
         if (record.isPosterGenerated() && record.getPosterUri() != null) {
@@ -915,6 +930,78 @@ public class GeneratedFilesFragment extends Fragment {
                 })
                 .setNegativeButton("Cancel", null)
                 .show();
+    }
+
+    private void confirmAndDeletePoster(@NonNull PosterFileItem item) {
+        if (host == null) {
+            return;
+        }
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Delete Poster & Record?")
+                .setMessage("This will permanently delete " + item.getFileName()
+                        + " and its linked property record (" + item.getRecordId() + ") from "
+                        + item.getSourceTxtFile() + ".")
+                .setPositiveButton("Delete", (d, w) -> performDelete(
+                        item.getCategory(), item.getRecordId(), item.getFileUri()))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void confirmAndDeleteRecord(@NonNull PropertyRecord record) {
+        if (host == null) {
+            return;
+        }
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Delete Property Record?")
+                .setMessage("This will permanently delete " + record.getRecordId()
+                        + " from " + record.getSourceFileName()
+                        + (record.isPosterGenerated()
+                        ? " along with its generated poster (" + record.getPosterFileName() + ")."
+                        : "."))
+                .setPositiveButton("Delete", (d, w) -> performDelete(
+                        record.getCategory(), record.getRecordId(), record.getPosterUri()))
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    private void performDelete(
+            @NonNull PropertyCategory category,
+            @NonNull String recordId,
+            @Nullable Uri posterUri
+    ) {
+        if (host == null) {
+            return;
+        }
+        ioExecutor.execute(() -> {
+            StorageManager.DeleteResult deleteResult =
+                    host.getStorageManager().deleteRecordAndPoster(category, recordId);
+            mainHandler.post(() -> {
+                if (!isAdded()) {
+                    return;
+                }
+                if (deleteResult.isSuccess()) {
+                    if (posterUri != null && postersAdapter != null) {
+                        postersAdapter.evictCacheForUri(posterUri);
+                    }
+                    String summary = (deleteResult.isDeletedPoster() ? "Poster & " : "")
+                            + (deleteResult.isDeletedRecord() ? "TXT record deleted" : "Removed");
+                    host.showTopToast(
+                            "Deleted " + recordId,
+                            summary,
+                            category == PropertyCategory.HOUSE_FOR_RENT
+                    );
+                    refreshAllData();
+                } else {
+                    new MaterialAlertDialogBuilder(requireContext())
+                            .setTitle("Delete Failed")
+                            .setMessage(deleteResult.getErrorMessage() != null
+                                    ? deleteResult.getErrorMessage()
+                                    : "Could not delete the selected poster and record.")
+                            .setPositiveButton("OK", null)
+                            .show();
+                }
+            });
+        });
     }
 
     private void showFullPosterPreview(

@@ -5,6 +5,38 @@
     android:layout_height="match_parent"
     android:orientation="vertical">
 
+    <!-- Top Back Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="?attr/phCardBg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="10dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="14dp"
+        android:paddingBottom="6dp">
+
+        <ImageButton
+            android:id="@+id/btnFilesBackArrow"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/back_to_home"
+            android:padding="7dp"
+            android:src="@drawable/ic_arrow_back"
+            app:tint="?attr/phTextPrimary" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:text="@string/nav_generated_files"
+            android:textColor="?attr/phTextPrimary"
+            android:textSize="18.5sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <!-- Segmented Mode Selector (Records | Bulk Generator | Posters | ZIP Exports) -->
     <com.google.android.material.tabs.TabLayout
         android:id="@+id/filesTabLayout"

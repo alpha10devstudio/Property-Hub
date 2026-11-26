@@ -52,4 +52,8 @@
     <color name="warning_bg">#FFF4E5</color>
     <color name="warning_border">#F5C27B</color>
     <color name="warning_text">#7A4600</color>
+
+    <color name="danger_red">#DC2626</color>
+    <color name="danger_bg">#FEE2E2</color>
+    <color name="danger_stroke">#FCA5A5</color>
 </resources>

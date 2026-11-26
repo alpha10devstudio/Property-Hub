@@ -262,7 +262,7 @@ public final class PosterTextFitter {
     }
 
     @NonNull
-    private static SpannableStringBuilder toSpannable(
+    public static SpannableStringBuilder toSpannable(
             @NonNull List<DetailsParagraphParser.StyledSegment> segments,
             @Nullable Typeface baseTypeface
     ) {

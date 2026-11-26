@@ -16,6 +16,8 @@ import androidx.documentfile.provider.DocumentFile;
 
 import com.propertyhub.offline.model.PosterFileItem;
 import com.propertyhub.offline.model.PropertyCategory;
+import com.propertyhub.offline.model.PropertyFieldCatalog;
+import com.propertyhub.offline.model.PropertyFieldValue;
 import com.propertyhub.offline.model.PropertyRecord;
 import com.propertyhub.offline.model.ZipFileItem;
 import com.propertyhub.offline.util.DateTimeProvider;
@@ -208,16 +210,92 @@ public class StorageManager {
         }
     }
 
+    public static final class DeleteResult {
+        private final boolean success;
+        private final boolean deletedPoster;
+        private final boolean deletedRecord;
+        @Nullable
+        private final String errorMessage;
+
+        private DeleteResult(
+                boolean success,
+                boolean deletedPoster,
+                boolean deletedRecord,
+                @Nullable String errorMessage
+        ) {
+            this.success = success;
+            this.deletedPoster = deletedPoster;
+            this.deletedRecord = deletedRecord;
+            this.errorMessage = errorMessage;
+        }
+
+        public static DeleteResult success(boolean deletedPoster, boolean deletedRecord) {
+            return new DeleteResult(true, deletedPoster, deletedRecord, null);
+        }
+
+        public static DeleteResult error(@NonNull String message) {
+            return new DeleteResult(false, false, false, message);
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        public boolean isDeletedPoster() {
+            return deletedPoster;
+        }
+
+        public boolean isDeletedRecord() {
+            return deletedRecord;
+        }
+
+        @Nullable
+        public String getErrorMessage() {
+            return errorMessage;
+        }
+    }
+
     /**
-     * Primary source-of-truth save operation.
-     * Stages the updated TXT payload to a temporary document, verifies staging integrity,
-     * appends/updates the daily category TXT file, and verifies final read-back before returning success.
+     * Legacy 3-argument save overload kept for compatibility.
      */
     @NonNull
     public StorageResult saveNewPropertyRecord(
             @NonNull PropertyCategory category,
             @NonNull String mobile,
             @NonNull String details
+    ) {
+        return saveNewPropertyRecord(
+                category,
+                PropertyFieldCatalog.getDefaultTitle(category),
+                mobile,
+                Collections.emptyList(),
+                details
+        );
+    }
+
+    /**
+     * Primary source-of-truth save operation for structured multi-field property records.
+     * Stages the updated TXT payload to a temporary document, verifies staging integrity,
+     * appends/updates the daily category TXT file, and verifies final read-back before returning success.
+     */
+    @NonNull
+    public StorageResult saveNewPropertyRecord(
+            @NonNull PropertyCategory category,
+            @NonNull String title,
+            @NonNull String mobile,
+            @NonNull List<PropertyFieldValue> fieldValues
+    ) {
+        String summaryDetails = PropertyRecord.buildHumanReadableSummary(category, fieldValues);
+        return saveNewPropertyRecord(category, title, mobile, fieldValues, summaryDetails);
+    }
+
+    @NonNull
+    private StorageResult saveNewPropertyRecord(
+            @NonNull PropertyCategory category,
+            @NonNull String title,
+            @NonNull String mobile,
+            @NonNull List<PropertyFieldValue> fieldValues,
+            @NonNull String detailsSummary
     ) {
         synchronized (FILE_LOCK) {
             DocumentFile propertyHubDir = resolveValidPropertyHubDir();
@@ -253,15 +331,17 @@ public class StorageManager {
                         extractMaxSequenceFromText(category, existingContent),
                         scanMaxSequenceInCategoryFolder(propertyHubDir, category)
                 );
-                String recordId = recordIdManager.allocateNextRecordId(category, observedMax);
+                String recordId = recordIdManager.allocateNextRecordId(category, dateStr, observedMax);
 
                 PropertyRecord record = new PropertyRecord(
                         recordId,
                         dateStr,
                         timeStr,
                         category,
+                        title,
                         mobile.trim(),
-                        details,
+                        detailsSummary,
+                        fieldValues,
                         targetFileName
                 );
 
@@ -287,6 +367,77 @@ public class StorageManager {
                         category,
                         "Unexpected storage error: " + safeErrorDetail(e)
                 );
+            }
+        }
+    }
+
+    /**
+     * Deletes both the generated JPG poster (if present) and the linked record block from its daily TXT file
+     * so no orphaned JPGs or dangling records remain.
+     */
+    @NonNull
+    public DeleteResult deleteRecordAndPoster(
+            @NonNull PropertyCategory category,
+            @NonNull String recordId
+    ) {
+        synchronized (FILE_LOCK) {
+            DocumentFile propertyHubDir = resolveValidPropertyHubDir();
+            if (propertyHubDir == null) {
+                return DeleteResult.error("Storage folder access is missing or revoked.");
+            }
+
+            boolean deletedPoster = false;
+            boolean deletedRecord = false;
+
+            try {
+                // 1. Delete matching poster JPG file(s)
+                DocumentFile postersRoot = findExactDirectory(propertyHubDir, GENERATED_POSTERS_FOLDER);
+                if (postersRoot != null) {
+                    String expectedNameLower = PropertyRecord.buildPosterFileName(category, recordId)
+                            .toLowerCase(Locale.US);
+                    List<DocumentFile> candidates = new ArrayList<>();
+                    collectPosterDocumentsForCategory(postersRoot, category, candidates);
+                    for (DocumentFile candidate : candidates) {
+                        String name = candidate.getName();
+                        if (name != null && name.toLowerCase(Locale.US).equals(expectedNameLower)) {
+                            if (candidate.delete()) {
+                                deletedPoster = true;
+                            }
+                        }
+                    }
+                }
+                settingsManager.removePosterManifestEntry(category, recordId);
+
+                // 2. Remove matching record block safely from category daily TXT files
+                DocumentFile catDir = findExactDirectory(propertyHubDir, category.getFolderName());
+                if (catDir != null) {
+                    for (DocumentFile txtFile : listSortedTxtFiles(catDir)) {
+                        String fileName = txtFile.getName();
+                        if (fileName == null) {
+                            continue;
+                        }
+                        String content = readExistingTextSafely(txtFile);
+                        RecordFormatter.RemoveResult removeResult =
+                                RecordFormatter.removeRecordFromContent(content, recordId);
+                        if (removeResult.isRemoved()) {
+                            String updated = removeResult.getUpdatedContent();
+                            if (updated.trim().isEmpty()) {
+                                txtFile.delete();
+                            } else {
+                                writeTxtViaStagingAndVerifyContent(catDir, txtFile, fileName, updated);
+                            }
+                            deletedRecord = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!deletedPoster && !deletedRecord) {
+                    return DeleteResult.error("Matching poster or record could not be found.");
+                }
+                return DeleteResult.success(deletedPoster, deletedRecord);
+            } catch (Exception e) {
+                return DeleteResult.error("Delete failed: " + safeErrorDetail(e));
             }
         }
     }
@@ -787,6 +938,43 @@ public class StorageManager {
         }
     }
 
+    private void writeTxtViaStagingAndVerifyContent(
+            @NonNull DocumentFile categoryDir,
+            @NonNull DocumentFile targetDoc,
+            @NonNull String targetFileName,
+            @NonNull String updatedContent
+    ) throws IOException {
+        byte[] expectedBytes = updatedContent.getBytes(StandardCharsets.UTF_8);
+        String tempFileName = "." + targetFileName + ".tmp";
+
+        DocumentFile staleTemp = findExactFile(categoryDir, tempFileName);
+        if (staleTemp != null && staleTemp.exists()) {
+            staleTemp.delete();
+        }
+
+        DocumentFile tempDoc = createFileExact(categoryDir, "text/plain", tempFileName);
+        if (tempDoc == null) {
+            throw new IOException("Could not create temporary staging document.");
+        }
+
+        try {
+            writeBytesSafely(tempDoc.getUri(), expectedBytes);
+            byte[] stagedVerify = readBytesFromUri(tempDoc.getUri());
+            if (!Arrays.equals(expectedBytes, stagedVerify)) {
+                throw new IOException("Staged TXT verification failed before updating file.");
+            }
+            writeBytesSafely(targetDoc.getUri(), expectedBytes);
+            byte[] finalVerify = readBytesFromUri(targetDoc.getUri());
+            if (!Arrays.equals(expectedBytes, finalVerify)) {
+                throw new IOException("Daily TXT verification failed after update.");
+            }
+        } finally {
+            if (tempDoc.exists()) {
+                tempDoc.delete();
+            }
+        }
+    }
+
     @NonNull
     private Map<String, Uri> indexValidPostersLocked(
             @NonNull DocumentFile propertyHubDir,
@@ -822,10 +1010,11 @@ public class StorageManager {
     ) {
         DocumentFile categoryDir = findExactDirectory(postersRoot, category.getFolderName());
         if (categoryDir != null) {
-            collectJpgFilesRecursive(categoryDir, out, null, 0);
+            collectJpgFilesRecursive(categoryDir, out, null, null, 0);
         }
         // Also scan any nested folders directly under Generated Posters for category-prefixed files
         String expectedPrefix = category.getPosterPrefix().toLowerCase(Locale.US);
+        String legacyPrefix = category.getLegacyPosterPrefix().toLowerCase(Locale.US);
         for (DocumentFile child : postersRoot.listFiles()) {
             String childName = child.getName();
             if (childName == null) {
@@ -834,10 +1023,11 @@ public class StorageManager {
             if (child.isDirectory()
                     && !PropertyCategory.HOUSE_FOR_RENT.getFolderName().equals(childName)
                     && !PropertyCategory.LAND_FOR_SALE.getFolderName().equals(childName)) {
-                collectJpgFilesRecursive(child, out, expectedPrefix, 1);
+                collectJpgFilesRecursive(child, out, expectedPrefix, legacyPrefix, 1);
             } else if (child.isFile()) {
                 String lower = childName.toLowerCase(Locale.US);
-                if (lower.startsWith(expectedPrefix) && (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) {
+                if ((lower.startsWith(expectedPrefix) || lower.startsWith(legacyPrefix))
+                        && (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) {
                     out.add(child);
                 }
             }
@@ -848,6 +1038,7 @@ public class StorageManager {
             @NonNull DocumentFile dir,
             @NonNull List<DocumentFile> out,
             @Nullable String requiredPrefixLower,
+            @Nullable String altPrefixLower,
             int depth
     ) {
         if (depth > 4) {
@@ -859,11 +1050,13 @@ public class StorageManager {
                 continue;
             }
             if (child.isDirectory()) {
-                collectJpgFilesRecursive(child, out, requiredPrefixLower, depth + 1);
+                collectJpgFilesRecursive(child, out, requiredPrefixLower, altPrefixLower, depth + 1);
             } else if (child.isFile()) {
                 String lower = name.toLowerCase(Locale.US);
-                if ((lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
-                        && (requiredPrefixLower == null || lower.startsWith(requiredPrefixLower))) {
+                boolean matchesPrefix = requiredPrefixLower == null
+                        || lower.startsWith(requiredPrefixLower)
+                        || (altPrefixLower != null && lower.startsWith(altPrefixLower));
+                if ((lower.endsWith(".jpg") || lower.endsWith(".jpeg")) && matchesPrefix) {
                     out.add(child);
                 }
             }
@@ -1094,8 +1287,12 @@ public class StorageManager {
         if (dot > 0) {
             base = base.substring(0, dot);
         }
-        if (base.startsWith(category.getPosterPrefix())) {
-            return category.getIdPrefix() + base.substring(category.getPosterPrefix().length());
+        String upper = base.toUpperCase(Locale.US);
+        if (upper.startsWith(category.getIdPrefix())) {
+            return base;
+        }
+        if (base.startsWith(category.getLegacyPosterPrefix())) {
+            return category.getLegacyIdPrefix() + base.substring(category.getLegacyPosterPrefix().length());
         }
         return base;
     }

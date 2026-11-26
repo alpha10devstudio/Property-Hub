@@ -21,47 +21,37 @@ import {
   Image as ImageIcon,
   Info,
   Layers,
+  Loader2,
   MapPin,
   Palette,
-  Phone,
+  RefreshCw,
   Send,
   Settings,
   Trash2,
   X,
 } from 'lucide-react';
+import { renderPortraitPosterDataUrl } from './posterEngine';
+import {
+  appendRecord,
+  buildDatedRecordId,
+  buildHumanReadableSummary,
+  buildPosterFileName,
+  CategoryCode,
+  getDefaultTitle,
+  getFieldsForCategory,
+  isValidBangladeshiMobile,
+  parseTxtContent,
+  PosterEntry,
+  PropertyFieldValue,
+  PropertyRecord,
+  removeRecordFromTxt,
+  ZipArchiveEntry,
+} from './propertyCatalog';
+import { RichFieldInput } from './RichFieldInput';
 
-type CategoryCode = 'HOUSE_FOR_RENT' | 'LAND_FOR_SALE';
-type NavTab = 'collect' | 'settings' | 'files';
+type ActiveScreen = 'collect' | 'settings' | 'files';
 type FilesSubTab = 'records' | 'bulk' | 'posters' | 'zip';
 type ThemeMode = 'blue' | 'light' | 'dark';
-
-interface PropertyRecord {
-  recordId: string;
-  date: string;
-  time: string;
-  category: CategoryCode;
-  mobile: string;
-  details: string;
-  sourceFileName: string;
-}
-
-interface PosterEntry {
-  recordId: string;
-  fileName: string;
-  category: CategoryCode;
-  date: string;
-  sourceTxtFile: string;
-  dataUrl: string;
-  createdAt: number;
-}
-
-interface ZipArchiveEntry {
-  fileName: string;
-  imageCount: number;
-  txtCount: number;
-  createdAt: string;
-  contents: string[];
-}
 
 interface SimulatorState {
   authorizedFolder: string | null;
@@ -75,7 +65,7 @@ interface SimulatorState {
   zips: ZipArchiveEntry[];
 }
 
-const STORAGE_KEY = 'property_hub_offline_v2';
+const STORAGE_KEY = 'property_hub_offline_v3';
 
 function getLocalDateStr(date = new Date()): string {
   const y = date.getFullYear();
@@ -93,1094 +83,18 @@ function getLocalTimeStr(date = new Date()): string {
   return `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
 }
 
-function buildPosterFileName(category: CategoryCode, recordId: string): string {
-  const prefix = category === 'HOUSE_FOR_RENT' ? 'HOUSE_' : 'LAND_';
-  const posterPrefix = category === 'HOUSE_FOR_RENT' ? 'House_' : 'Land_';
-  const suffix = recordId.startsWith(prefix) ? recordId.slice(prefix.length) : recordId;
-  return `${posterPrefix}${suffix}.jpg`;
-}
-
-function formatRecordBlock(rec: PropertyRecord): string {
-  return [
-    '========================================',
-    'PROPERTY RECORD',
-    `RECORD_ID: ${rec.recordId}`,
-    `DATE: ${rec.date}`,
-    `TIME: ${rec.time}`,
-    `CATEGORY: ${rec.category}`,
-    `MOBILE: ${rec.mobile.trim()}`,
-    'DETAILS:',
-    rec.details.replace(/\r\n/g, '\n'),
-    '',
-  ].join('\n');
-}
-
-function appendRecord(existing: string, rec: PropertyRecord): string {
-  const block = formatRecordBlock(rec);
-  if (!existing.trim()) return block;
-  let prefix = existing;
-  if (!prefix.endsWith('\n')) prefix += '\n';
-  if (!prefix.endsWith('\n\n')) prefix += '\n';
-  return `${prefix}${block}`;
-}
-
-function parseTxtContent(
-  content: string,
-  fallbackCategory: CategoryCode,
-  sourceFileName: string
-): PropertyRecord[] {
-  if (!content.trim()) return [];
-  const normalized = content.replace(/\r\n/g, '\n');
-  const blocks = normalized
-    .split(/^={10,}\s*$/m)
-    .map((b) => b.trim())
-    .filter(Boolean);
-
-  const out: PropertyRecord[] = [];
-  for (const block of blocks) {
-    const lines = block.split('\n');
-    let recordId = '';
-    let date = sourceFileName.replace(/\.txt$/, '');
-    let time = '';
-    let category = fallbackCategory;
-    let mobile = '';
-    const detailsLines: string[] = [];
-    let inDetails = false;
-
-    for (const line of lines) {
-      if (inDetails) {
-        detailsLines.push(line);
-        continue;
-      }
-      const t = line.trim();
-      if (!t || t === 'PROPERTY RECORD') continue;
-      if (t.startsWith('RECORD_ID:')) recordId = t.slice(10).trim();
-      else if (t.startsWith('DATE:')) date = t.slice(5).trim();
-      else if (t.startsWith('TIME:')) time = t.slice(5).trim();
-      else if (t.startsWith('CATEGORY:')) {
-        const raw = t.slice(9).trim();
-        if (raw === 'HOUSE_FOR_RENT' || raw === 'LAND_FOR_SALE') category = raw;
-      } else if (t.startsWith('MOBILE:')) mobile = t.slice(7).trim();
-      else if (t === 'DETAILS:') inDetails = true;
-    }
-
-    if (mobile || detailsLines.length > 0) {
-      out.push({
-        recordId: recordId || `${category === 'HOUSE_FOR_RENT' ? 'HOUSE' : 'LAND'}_LEGACY`,
-        date,
-        time,
-        category,
-        mobile,
-        details: detailsLines.join('\n').replace(/\n+$/, ''),
-        sourceFileName,
-      });
-    }
-  }
-  return out;
-}
-
-function parseDetailsParagraphs(rawDetails: string): string[] {
-  if (!rawDetails.trim()) return ['-'];
-  const normalized = rawDetails.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const hasQuote = /["\u201C\u201D]/.test(normalized);
-  if (!hasQuote) {
-    const lines = normalized
-      .split('\n')
-      .map((l) => l.trim())
-      .filter(Boolean);
-    return lines.length > 0 ? lines : ['-'];
-  }
-
-  const paragraphs: string[] = [];
-  let buf = '';
-  let inQuotes = false;
-  let expectedClose = '"';
-
-  const flushUnquoted = () => {
-    const t = buf.trim();
-    buf = '';
-    if (t) paragraphs.push(t);
-  };
-
-  for (let i = 0; i < normalized.length; i++) {
-    const ch = normalized[i];
-    if (!inQuotes) {
-      if (ch === '"' || ch === '\u201C') {
-        flushUnquoted();
-        inQuotes = true;
-        expectedClose = ch === '\u201C' ? '\u201D' : '"';
-      } else if (ch === ',' || ch === '\n') {
-        flushUnquoted();
-      } else if (!/\s/.test(ch) || buf.length > 0) {
-        buf += ch;
-      }
-    } else {
-      const next = i + 1 < normalized.length ? normalized[i + 1] : '';
-      if (ch === '\\' && (next === '"' || next === '\u201C' || next === '\u201D')) {
-        buf += next;
-        i++;
-      } else if (
-        expectedClose === '\u201D'
-          ? ch === '\u201D' || ch === '"'
-          : ch === '"' || ch === '\u201D'
-      ) {
-        const t = buf.trim();
-        buf = '';
-        if (t) paragraphs.push(t);
-        inQuotes = false;
-      } else {
-        buf += ch;
-      }
-    }
-  }
-  const rem = buf.trim();
-  if (rem) paragraphs.push(rem);
-  return paragraphs.length > 0 ? paragraphs : ['-'];
-}
-
-interface StyledSegment {
-  text: string;
-  bold: boolean;
-  italic: boolean;
-}
-
-interface StyledToken {
-  text: string;
-  bold: boolean;
-  italic: boolean;
-}
-
-function parseInlineMarkdown(paragraph: string): StyledSegment[] {
-  if (!paragraph) return [{ text: '', bold: false, italic: false }];
-  const raw: StyledSegment[] = [];
-
-  const isAlphaNum = (ch: string) => /[\p{L}\p{N}]/u.test(ch);
-  const isWs = (ch: string) => /\s/.test(ch);
-
-  const findClosingTriple = (src: string, from: number, end: number, marker: string) => {
-    for (let j = from; j <= end - 3; j++) {
-      if (src[j] === '\\') {
-        j++;
-        continue;
-      }
-      if (src[j] === marker && src[j + 1] === marker && src[j + 2] === marker && !isWs(src[j - 1])) {
-        return j;
-      }
-    }
-    return -1;
-  };
-
-  const findClosingDouble = (src: string, from: number, end: number, marker: string) => {
-    for (let j = from; j <= end - 2; j++) {
-      if (src[j] === '\\') {
-        j++;
-        continue;
-      }
-      if (src[j] === marker && src[j + 1] === marker && !isWs(src[j - 1])) {
-        return j;
-      }
-    }
-    return -1;
-  };
-
-  const findClosingSingle = (src: string, from: number, end: number, marker: string) => {
-    for (let j = from; j < end; j++) {
-      if (src[j] === '\\') {
-        j++;
-        continue;
-      }
-      if (j + 1 < end && src[j] === marker && src[j + 1] === marker) {
-        j++;
-        continue;
-      }
-      if (src[j] === marker && !isWs(src[j - 1])) {
-        if (marker === '*' || j + 1 >= end || !isAlphaNum(src[j + 1])) {
-          return j;
-        }
-      }
-    }
-    return -1;
-  };
-
-  const walk = (src: string, start: number, end: number, bold: boolean, italic: boolean) => {
-    let plain = '';
-    const flush = () => {
-      if (plain) {
-        raw.push({ text: plain, bold, italic });
-        plain = '';
-      }
+function createInitialFormMap(category: CategoryCode): Record<string, PropertyFieldValue> {
+  const map: Record<string, PropertyFieldValue> = {};
+  for (const cfg of getFieldsForCategory(category)) {
+    const def = cfg.defaultValue;
+    map[cfg.fieldId] = {
+      fieldId: cfg.fieldId,
+      label: cfg.label,
+      plainText: def,
+      segments: def ? [{ text: def, bold: false, italic: false }] : [],
     };
-
-    let i = start;
-    while (i < end) {
-      const ch = src[i];
-      if (ch === '\\' && i + 1 < end && (src[i + 1] === '*' || src[i + 1] === '_' || src[i + 1] === '\\')) {
-        plain += src[i + 1];
-        i += 2;
-        continue;
-      }
-      if (ch === '*' || ch === '_') {
-        if (i + 2 < end && src[i + 1] === ch && src[i + 2] === ch && i + 3 < end && !isWs(src[i + 3])) {
-          const closeIdx = findClosingTriple(src, i + 3, end, ch);
-          if (closeIdx > i + 3) {
-            flush();
-            walk(src, i + 3, closeIdx, true, true);
-            i = closeIdx + 3;
-            continue;
-          }
-        }
-        if (i + 1 < end && src[i + 1] === ch && i + 2 < end && !isWs(src[i + 2])) {
-          const closeIdx = findClosingDouble(src, i + 2, end, ch);
-          if (closeIdx > i + 2) {
-            flush();
-            walk(src, i + 2, closeIdx, true, italic);
-            i = closeIdx + 2;
-            continue;
-          }
-        }
-        if (i + 1 < end && !isWs(src[i + 1])) {
-          const leftOk = ch === '*' || i <= start || !isAlphaNum(src[i - 1]);
-          if (leftOk) {
-            const closeIdx = findClosingSingle(src, i + 1, end, ch);
-            if (closeIdx > i + 1) {
-              flush();
-              walk(src, i + 1, closeIdx, bold, true);
-              i = closeIdx + 1;
-              continue;
-            }
-          }
-        }
-      }
-      plain += ch;
-      i++;
-    }
-    flush();
-  };
-
-  walk(paragraph, 0, paragraph.length, false, false);
-  const merged: StyledSegment[] = [];
-  for (const seg of raw) {
-    if (!seg.text) continue;
-    const last = merged[merged.length - 1];
-    if (last && last.bold === seg.bold && last.italic === seg.italic) {
-      last.text += seg.text;
-    } else {
-      merged.push({ ...seg });
-    }
   }
-  return merged.length > 0 ? merged : [{ text: paragraph, bold: false, italic: false }];
-}
-
-function buildCanvasFont(fontSize: number, bold: boolean, italic: boolean): string {
-  const stylePart = `${italic ? 'italic ' : ''}${bold ? 'bold ' : '500 '}`;
-  return `${stylePart}${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-}
-
-function wrapStyledParagraphs(
-  ctx: CanvasRenderingContext2D,
-  styledParagraphs: StyledSegment[][],
-  maxWidth: number,
-  fontSize: number
-): StyledToken[][][] {
-  return styledParagraphs.map((segments) => {
-    // Split into explicit sub-lines by '\n'
-    const subLines: StyledSegment[][] = [[]];
-    for (const seg of segments) {
-      const parts = seg.text.split('\n');
-      parts.forEach((part, idx) => {
-        if (part) {
-          subLines[subLines.length - 1].push({
-            text: part,
-            bold: seg.bold,
-            italic: seg.italic,
-          });
-        }
-        if (idx < parts.length - 1) {
-          subLines.push([]);
-        }
-      });
-    }
-
-    const wrappedLines: StyledToken[][] = [];
-    for (const subSegs of subLines) {
-      // Tokenize keeping trailing/leading spaces attached cleanly for word-level wrapping
-      const tokens: StyledToken[] = [];
-      for (const seg of subSegs) {
-        const chunks = seg.text.split(/(\s+)/);
-        for (const chunk of chunks) {
-          if (!chunk) continue;
-          tokens.push({ text: chunk, bold: seg.bold, italic: seg.italic });
-        }
-      }
-
-      let currentLine: StyledToken[] = [];
-      let currentWidth = 0;
-
-      for (const tok of tokens) {
-        const isSpaceOnly = /^\s+$/.test(tok.text);
-        if (currentLine.length === 0 && isSpaceOnly) continue;
-
-        ctx.font = buildCanvasFont(fontSize, tok.bold, tok.italic);
-        const tokW = ctx.measureText(tok.text).width;
-
-        if (currentWidth + tokW <= maxWidth || currentLine.length === 0) {
-          currentLine.push(tok);
-          currentWidth += tokW;
-        } else {
-          // Trim trailing whitespace on wrapped line
-          while (currentLine.length > 0 && /^\s+$/.test(currentLine[currentLine.length - 1].text)) {
-            currentLine.pop();
-          }
-          if (currentLine.length > 0) wrappedLines.push(currentLine);
-          if (isSpaceOnly) {
-            currentLine = [];
-            currentWidth = 0;
-          } else {
-            currentLine = [tok];
-            currentWidth = tokW;
-          }
-        }
-      }
-      while (currentLine.length > 0 && /^\s+$/.test(currentLine[currentLine.length - 1].text)) {
-        currentLine.pop();
-      }
-      if (currentLine.length > 0) wrappedLines.push(currentLine);
-    }
-
-    return wrappedLines.length > 0 ? wrappedLines : [[{ text: '-', bold: false, italic: false }]];
-  });
-}
-
-function computeDynamicGeometry(width: number, height: number, desiredDetailsH: number) {
-  const OUTER_MARGIN = 16;
-  const CARD_SIDE = 36;
-  const CARD_GAP = 26;
-  const HEADER_H = 118;
-  const STACK_TOP = 158;
-  const STACK_BOTTOM = height - 34;
-  const STACK_BUDGET = STACK_BOTTOM - STACK_TOP;
-  const CARDS_SUM_BUDGET = STACK_BUDGET - 2 * CARD_GAP;
-
-  const MIN_TITLE_H = 156;
-  const MAX_TITLE_H = 224;
-  const MIN_CONTACT_H = 148;
-  const MAX_CONTACT_H = 204;
-  const MIN_DETAILS_H = 256;
-  const MAX_DETAILS_H = CARDS_SUM_BUDGET - MIN_TITLE_H - MIN_CONTACT_H;
-
-  const detailsH = Math.max(MIN_DETAILS_H, Math.min(MAX_DETAILS_H, desiredDetailsH));
-  const remaining = CARDS_SUM_BUDGET - detailsH;
-  const extra = Math.max(0, remaining - MIN_TITLE_H - MIN_CONTACT_H);
-
-  const titleH = Math.min(MAX_TITLE_H, MIN_TITLE_H + extra * 0.52);
-  const contactH = Math.min(MAX_CONTACT_H, MIN_CONTACT_H + (extra - (titleH - MIN_TITLE_H)));
-
-  const totalStackH = titleH + CARD_GAP + detailsH + CARD_GAP + contactH;
-  const slack = Math.max(0, STACK_BUDGET - totalStackH);
-
-  const titleTop = STACK_TOP + slack * 0.42;
-  const titleBottom = titleTop + titleH;
-  const detailsTop = titleBottom + CARD_GAP;
-  const detailsBottom = detailsTop + detailsH;
-  const contactTop = detailsBottom + CARD_GAP;
-  const contactBottom = contactTop + contactH;
-
-  const headerBottom = Math.max(26 + HEADER_H, titleTop - 16);
-  const headerTop = headerBottom - HEADER_H;
-
-  const cardLeft = CARD_SIDE;
-  const cardRight = width - CARD_SIDE;
-  const dividerX = cardLeft + 336;
-  const textLeft = dividerX + 34;
-  const textRight = cardRight - 34;
-
-  return {
-    outerRect: { left: OUTER_MARGIN, top: OUTER_MARGIN, right: width - OUTER_MARGIN, bottom: height - OUTER_MARGIN },
-    headerRect: { left: cardLeft, top: headerTop, right: cardRight, bottom: headerBottom, height: HEADER_H },
-    titleRect: { left: cardLeft, top: titleTop, right: cardRight, bottom: titleBottom, width: cardRight - cardLeft, height: titleH },
-    detailsCard: { left: cardLeft, top: detailsTop, right: cardRight, bottom: detailsBottom, width: cardRight - cardLeft, height: detailsH },
-    contactRect: { left: cardLeft, top: contactTop, right: cardRight, bottom: contactBottom, width: cardRight - cardLeft, height: contactH },
-    dividerX,
-    textBox: { left: textLeft, top: detailsTop + 32, width: textRight - textLeft, height: detailsH - 64 },
-    maxDetailsH: MAX_DETAILS_H,
-  };
-}
-
-function drawDiamondMarker(
-  ctx: CanvasRenderingContext2D,
-  cx: number,
-  cy: number,
-  r: number,
-  outerColor: string,
-  innerColor: string
-) {
-  ctx.fillStyle = outerColor;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - r);
-  ctx.lineTo(cx + r, cy);
-  ctx.lineTo(cx, cy + r);
-  ctx.lineTo(cx - r, cy);
-  ctx.closePath();
-  ctx.fill();
-
-  const ir = r * 0.45;
-  ctx.fillStyle = innerColor;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - ir);
-  ctx.lineTo(cx + ir, cy);
-  ctx.lineTo(cx, cy + ir);
-  ctx.lineTo(cx - ir, cy);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawHandsetPath(ctx: CanvasRenderingContext2D) {
-  ctx.beginPath();
-  ctx.moveTo(-22, -34);
-  ctx.quadraticCurveTo(-34, -32, -34, -18);
-  ctx.bezierCurveTo(-34, 6, -6, 34, 18, 34);
-  ctx.quadraticCurveTo(32, 34, 34, 22);
-  ctx.lineTo(34, 12);
-  ctx.quadraticCurveTo(34, 6, 26, 4);
-  ctx.lineTo(14, 2);
-  ctx.quadraticCurveTo(9, 1, 6, 5);
-  ctx.lineTo(1, 11);
-  ctx.quadraticCurveTo(-8, 6, -11, -1);
-  ctx.lineTo(-5, -6);
-  ctx.quadraticCurveTo(-1, -9, -2, -14);
-  ctx.lineTo(-4, -26);
-  ctx.quadraticCurveTo(-6, -34, -12, -34);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function renderPosterDataUrl(record: PropertyRecord): string {
-  const width = 1440;
-  const height = 1080;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return '';
-
-  const isHouse = record.category === 'HOUSE_FOR_RENT';
-  const FIXED_TITLE_SIZE = 94;
-  const FIXED_CONTACT_SIZE = 82;
-  const COMPACT_CARD_MAX_H = 348;
-  const VERT_PAD = 32;
-
-  const styledParagraphs = parseDetailsParagraphs(record.details).map(parseInlineMarkdown);
-  const baseGeom = computeDynamicGeometry(width, height, COMPACT_CARD_MAX_H);
-  const textWidth = baseGeom.textBox.width;
-  const compactMaxTextH = COMPACT_CARD_MAX_H - 2 * VERT_PAD;
-  const expandedMaxTextH = baseGeom.maxDetailsH - 2 * VERT_PAD;
-
-  const measureFit = (startSize: number, minSize: number, maxH: number) => {
-    let size = startSize;
-    while (size >= minSize) {
-      const wrapped = wrapStyledParagraphs(ctx, styledParagraphs, textWidth, size);
-      const lineH = size * 1.18;
-      const paraGap = Math.max(10, size * 0.42);
-      const totalH =
-        wrapped.reduce((acc, g) => acc + g.length * lineH, 0) +
-        Math.max(0, wrapped.length - 1) * paraGap;
-      if (totalH <= maxH) {
-        return { wrapped, fontSize: size, lineH, paraGap, totalH, overflowed: false };
-      }
-      size -= 2;
-    }
-    const minWrapped = wrapStyledParagraphs(ctx, styledParagraphs, textWidth, minSize);
-    const minLineH = minSize * 1.12;
-    const minGap = Math.max(8, minSize * 0.30);
-    const minTotalH =
-      minWrapped.reduce((acc, g) => acc + g.length * minLineH, 0) +
-      Math.max(0, minWrapped.length - 1) * minGap;
-    return {
-      wrapped: minWrapped,
-      fontSize: minSize,
-      lineH: minLineH,
-      paraGap: minGap,
-      totalH: minTotalH,
-      overflowed: minTotalH > maxH,
-    };
-  };
-
-  let chosenFit = measureFit(66, 50, compactMaxTextH);
-  let desiredCardH = Math.max(256, chosenFit.totalH + 2 * VERT_PAD);
-  if (chosenFit.overflowed || chosenFit.totalH > compactMaxTextH) {
-    chosenFit = measureFit(50, 18, expandedMaxTextH);
-    desiredCardH = chosenFit.overflowed
-      ? baseGeom.maxDetailsH
-      : Math.max(COMPACT_CARD_MAX_H, Math.min(baseGeom.maxDetailsH, chosenFit.totalH + 2 * VERT_PAD));
-  }
-
-  const layout = computeDynamicGeometry(width, height, desiredCardH);
-
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillRect(0, 0, width, height);
-
-  if (isHouse) {
-    const NAVY = '#032668';
-
-    // Outer border
-    ctx.strokeStyle = NAVY;
-    ctx.lineWidth = 7;
-    ctx.beginPath();
-    ctx.roundRect(16, 16, width - 32, height - 32, 48);
-    ctx.stroke();
-
-    // Dynamic top roof silhouette + wings
-    ctx.save();
-    ctx.translate(0, layout.headerRect.top - 32);
-    ctx.fillStyle = NAVY;
-    ctx.beginPath();
-    ctx.moveTo(96, 114);
-    ctx.lineTo(430, 106);
-    ctx.arc(430, 114, 8, -Math.PI / 2, Math.PI / 2);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(width - 96, 114);
-    ctx.lineTo(width - 430, 106);
-    ctx.arc(width - 430, 114, 8, -Math.PI / 2, Math.PI / 2, true);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(438, 150);
-    ctx.lineTo(618, 48);
-    ctx.lineTo(632, 56);
-    ctx.lineTo(466, 150);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(482, 150);
-    ctx.lineTo(720, 32);
-    ctx.lineTo(824, 84);
-    ctx.lineTo(824, 54);
-    ctx.lineTo(858, 54);
-    ctx.lineTo(858, 101);
-    ctx.lineTo(960, 150);
-    ctx.lineTo(890, 150);
-    ctx.lineTo(720, 64);
-    ctx.lineTo(548, 150);
-    ctx.closePath();
-    ctx.fill();
-
-    const cx = width / 2;
-    ctx.fillRect(cx - 22, 98, 18, 18);
-    ctx.fillRect(cx + 4, 98, 18, 18);
-    ctx.fillRect(cx - 22, 124, 18, 18);
-    ctx.fillRect(cx + 4, 124, 18, 18);
-    ctx.restore();
-
-    // Fixed Title Card
-    ctx.fillStyle = NAVY;
-    ctx.beginPath();
-    ctx.roundRect(layout.titleRect.left, layout.titleRect.top, layout.titleRect.width, layout.titleRect.height, 50);
-    ctx.fill();
-
-    ctx.font = `bold ${FIXED_TITLE_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('ফ্ল্যাট / বাসা ভাড়া দেওয়া হবে', width / 2, (layout.titleRect.top + layout.titleRect.bottom) / 2);
-
-    // Dynamic Details Card
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 44);
-    ctx.fill();
-    ctx.strokeStyle = NAVY;
-    ctx.lineWidth = 6;
-    ctx.stroke();
-
-    // Proportionally scaled 2-story house + tree illustration
-    const paneW = layout.dividerX - layout.detailsCard.left;
-    const hScale = Math.min(1.08, Math.min((paneW - 36) / 294, (layout.detailsCard.height - 44) / 322));
-    ctx.save();
-    ctx.translate(layout.detailsCard.left + paneW / 2, (layout.detailsCard.top + layout.detailsCard.bottom) / 2);
-    ctx.scale(hScale, hScale);
-    ctx.translate(-210, -613);
-
-    ctx.fillStyle = NAVY;
-    ctx.beginPath();
-    ctx.moveTo(64, 772);
-    ctx.quadraticCurveTo(208, 746, 354, 772);
-    ctx.quadraticCurveTo(208, 760, 64, 772);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillRect(94, 710, 12, 54);
-    ctx.beginPath();
-    ctx.arc(100, 678, 30, 0, Math.PI * 2);
-    ctx.arc(84, 696, 20, 0, Math.PI * 2);
-    ctx.arc(116, 696, 20, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.strokeStyle = NAVY;
-    ctx.lineWidth = 6;
-    ctx.strokeRect(140, 522, 72, 236);
-    ctx.beginPath();
-    ctx.moveTo(212, 506);
-    ctx.lineTo(212, 758);
-    ctx.moveTo(334, 506);
-    ctx.lineTo(334, 758);
-    ctx.moveTo(130, 610);
-    ctx.lineTo(344, 610);
-    ctx.stroke();
-
-    ctx.beginPath();
-    ctx.moveTo(192, 514);
-    ctx.lineTo(274, 454);
-    ctx.lineTo(312, 478);
-    ctx.lineTo(312, 458);
-    ctx.lineTo(330, 458);
-    ctx.lineTo(330, 488);
-    ctx.lineTo(356, 514);
-    ctx.lineTo(340, 526);
-    ctx.lineTo(274, 472);
-    ctx.lineTo(206, 526);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillRect(251, 510, 20, 20);
-    ctx.fillRect(277, 510, 20, 20);
-    ctx.fillRect(251, 536, 20, 20);
-    ctx.fillRect(277, 536, 20, 20);
-    ctx.lineWidth = 4;
-    ctx.strokeRect(154, 540, 48, 54);
-    ctx.strokeRect(154, 630, 44, 48);
-    ctx.fillRect(254, 630, 62, 128);
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(276, 696, 3.2, 0, Math.PI * 2);
-    ctx.arc(294, 696, 3.2, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Vertical divider
-    const divInset = Math.min(38, layout.detailsCard.height * 0.12);
-    ctx.strokeStyle = NAVY;
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(layout.dividerX, layout.detailsCard.top + divInset);
-    ctx.lineTo(layout.dividerX, layout.detailsCard.bottom - divInset);
-    ctx.stroke();
-
-    // Dynamic Details Styled Text
-    ctx.fillStyle = NAVY;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    let drawY = layout.textBox.top + (!chosenFit.overflowed ? Math.max(0, (layout.textBox.height - chosenFit.totalH) / 2) : 0);
-    for (let gi = 0; gi < chosenFit.wrapped.length; gi++) {
-      for (const lineTokens of chosenFit.wrapped[gi]) {
-        if (drawY + chosenFit.lineH > layout.textBox.top + layout.textBox.height + 10) break;
-        let runX = layout.textBox.left;
-        for (const tok of lineTokens) {
-          ctx.font = buildCanvasFont(chosenFit.fontSize, tok.bold, tok.italic);
-          ctx.fillText(tok.text, runX, drawY);
-          runX += ctx.measureText(tok.text).width;
-        }
-        drawY += chosenFit.lineH;
-      }
-      if (gi < chosenFit.wrapped.length - 1) drawY += chosenFit.paraGap;
-    }
-
-    // Bottom Navy Contact Banner
-    ctx.fillStyle = NAVY;
-    ctx.beginPath();
-    ctx.roundRect(layout.contactRect.left, layout.contactRect.top, layout.contactRect.width, layout.contactRect.height, 50);
-    ctx.fill();
-
-    const contactMidY = (layout.contactRect.top + layout.contactRect.bottom) / 2;
-    const phoneR = Math.min(62, layout.contactRect.height * 0.32);
-    const phoneCx = layout.contactRect.left + 108;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(phoneCx, contactMidY, phoneR, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.save();
-    ctx.translate(phoneCx, contactMidY);
-    ctx.scale(phoneR / 64, phoneR / 64);
-    ctx.fillStyle = NAVY;
-    drawHandsetPath(ctx);
-    ctx.restore();
-
-    const cDivX = layout.contactRect.left + 206;
-    const cDivInset = Math.min(30, layout.contactRect.height * 0.16);
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(cDivX, layout.contactRect.top + cDivInset);
-    ctx.lineTo(cDivX, layout.contactRect.bottom - cDivInset);
-    ctx.stroke();
-
-    const mobAreaLeft = cDivX + 30;
-    const mobAreaW = layout.contactRect.right - 36 - mobAreaLeft;
-    ctx.font = `bold ${FIXED_CONTACT_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`যোগাযোগ: ${record.mobile}`, mobAreaLeft + mobAreaW / 2, contactMidY);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-  } else {
-    // LAND FOR SALE: Distinct Green + White Surveyor & Plot Design using shared Dynamic Layout
-    const FOREST = '#0B5D2E';
-    const EMERALD = '#16A34A';
-    const SOFT_MINT = '#EEFBF3';
-    const PINE_TEXT = '#063B1D';
-
-    // Double surveyor outer frame
-    ctx.strokeStyle = FOREST;
-    ctx.lineWidth = 6.5;
-    ctx.beginPath();
-    ctx.roundRect(16, 16, width - 32, height - 32, 30);
-    ctx.stroke();
-
-    ctx.strokeStyle = EMERALD;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(26, 26, width - 52, height - 52, 24);
-    ctx.stroke();
-
-    // Top Location Pin + Horizon Boundary Stakes Emblem
-    const hCx = width / 2;
-    const hBottom = layout.headerRect.bottom - 6;
-    const barY = hBottom - 28;
-    ctx.strokeStyle = FOREST;
-    ctx.lineWidth = 6;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(hCx - 540, barY);
-    ctx.lineTo(hCx - 158, barY);
-    ctx.moveTo(hCx + 158, barY);
-    ctx.lineTo(hCx + 540, barY);
-    ctx.stroke();
-
-    ctx.strokeStyle = EMERALD;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(hCx - 496, barY + 12);
-    ctx.lineTo(hCx - 176, barY + 12);
-    ctx.moveTo(hCx + 176, barY + 12);
-    ctx.lineTo(hCx + 496, barY + 12);
-    ctx.stroke();
-
-    drawDiamondMarker(ctx, hCx - 158, barY, 10, FOREST, '#FFFFFF');
-    drawDiamondMarker(ctx, hCx + 158, barY, 10, FOREST, '#FFFFFF');
-    drawDiamondMarker(ctx, hCx - 540, barY, 7, EMERALD, '#FFFFFF');
-    drawDiamondMarker(ctx, hCx + 540, barY, 7, EMERALD, '#FFFFFF');
-
-    ctx.strokeStyle = FOREST;
-    ctx.lineWidth = 5;
-    ctx.beginPath();
-    ctx.moveTo(hCx - 122, hBottom);
-    ctx.quadraticCurveTo(hCx, hBottom - 34, hCx + 122, hBottom);
-    ctx.stroke();
-
-    ctx.strokeStyle = EMERALD;
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.moveTo(hCx - 82, hBottom + 4);
-    ctx.quadraticCurveTo(hCx, hBottom - 16, hCx + 82, hBottom + 4);
-    ctx.stroke();
-
-    const pinCy = layout.headerRect.top + 38;
-    const pinR = 29;
-    ctx.fillStyle = FOREST;
-    ctx.beginPath();
-    ctx.arc(hCx, pinCy, pinR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(hCx - pinR * 0.86, pinCy + pinR * 0.45);
-    ctx.lineTo(hCx, hBottom - 14);
-    ctx.lineTo(hCx + pinR * 0.86, pinCy + pinR * 0.45);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(hCx, pinCy, 14, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = EMERALD;
-    ctx.beginPath();
-    ctx.arc(hCx, pinCy, 7.5, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Architectural Forest Green Title Card ("জমি বিক্রি করা হবে") — FIXED Font Size
-    ctx.fillStyle = FOREST;
-    ctx.beginPath();
-    ctx.roundRect(layout.titleRect.left, layout.titleRect.top, layout.titleRect.width, layout.titleRect.height, 22);
-    ctx.fill();
-
-    const stripW = Math.min(460, layout.titleRect.width * 0.36);
-    const stripL = width / 2 - stripW / 2;
-    ctx.fillStyle = EMERALD;
-    ctx.beginPath();
-    ctx.roundRect(stripL, layout.titleRect.top + 8, stripW, 6, 3);
-    ctx.roundRect(stripL, layout.titleRect.bottom - 14, stripW, 6, 3);
-    ctx.fill();
-
-    const titleMidY = (layout.titleRect.top + layout.titleRect.bottom) / 2;
-    drawDiamondMarker(ctx, layout.titleRect.left + 72, titleMidY, 15, EMERALD, '#FFFFFF');
-    drawDiamondMarker(ctx, layout.titleRect.right - 72, titleMidY, 15, EMERALD, '#FFFFFF');
-
-    ctx.font = `bold ${FIXED_TITLE_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('জমি বিক্রি করা হবে', width / 2, titleMidY);
-
-    // Dynamic Details Card with Soft Mint Left Zone & Survey Plot Graphics
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 24);
-    ctx.fill();
-
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 24);
-    ctx.clip();
-    ctx.fillStyle = SOFT_MINT;
-    ctx.fillRect(layout.detailsCard.left, layout.detailsCard.top, layout.dividerX - layout.detailsCard.left, layout.detailsCard.height);
-    ctx.restore();
-
-    ctx.strokeStyle = FOREST;
-    ctx.lineWidth = 5.5;
-    ctx.beginPath();
-    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 24);
-    ctx.stroke();
-
-    // Right L-corner surveyor ticks
-    ctx.strokeStyle = EMERALD;
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(layout.detailsCard.right - 40, layout.detailsCard.top + 18);
-    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.top + 18);
-    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.top + 40);
-    ctx.moveTo(layout.detailsCard.right - 40, layout.detailsCard.bottom - 18);
-    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.bottom - 18);
-    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.bottom - 40);
-    ctx.stroke();
-
-    // Proportionally scaled Surveyed Land Plot + Trees + Boundary Stakes + Pin Illustration
-    const paneW = layout.dividerX - layout.detailsCard.left;
-    const lScale = Math.min(1.08, Math.min((paneW - 34) / 292, (layout.detailsCard.height - 42) / 302));
-    ctx.save();
-    ctx.translate(layout.detailsCard.left + paneW / 2, (layout.detailsCard.top + layout.detailsCard.bottom) / 2);
-    ctx.scale(lScale, lScale);
-
-    ctx.fillStyle = FOREST;
-    ctx.beginPath();
-    ctx.moveTo(-136, 122);
-    ctx.quadraticCurveTo(0, 96, 136, 122);
-    ctx.quadraticCurveTo(0, 110, -136, 122);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.beginPath();
-    ctx.moveTo(-84, 18);
-    ctx.lineTo(84, 18);
-    ctx.lineTo(126, 100);
-    ctx.lineTo(-126, 100);
-    ctx.closePath();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fill();
-    ctx.fillStyle = 'rgba(22, 163, 74, 0.15)';
-    ctx.fill();
-
-    ctx.save();
-    ctx.setLineDash([9, 7]);
-    ctx.strokeStyle = EMERALD;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(0, 18);
-    ctx.lineTo(0, 100);
-    ctx.moveTo(-106, 58);
-    ctx.lineTo(106, 58);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.strokeStyle = FOREST;
-    ctx.lineWidth = 5.5;
-    ctx.beginPath();
-    ctx.moveTo(-84, 18);
-    ctx.lineTo(84, 18);
-    ctx.lineTo(126, 100);
-    ctx.lineTo(-126, 100);
-    ctx.closePath();
-    ctx.stroke();
-
-    // Rear trees
-    for (const [tx, ty, ts] of [
-      [-104, 20, 0.92],
-      [104, 20, 0.85],
-    ]) {
-      ctx.save();
-      ctx.translate(tx, ty);
-      ctx.scale(ts, ts);
-      ctx.fillStyle = FOREST;
-      ctx.fillRect(-4.5, -40, 9, 40);
-      ctx.beginPath();
-      ctx.arc(0, -64, 22, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = EMERALD;
-      ctx.beginPath();
-      ctx.arc(-11, -50, 14, 0, Math.PI * 2);
-      ctx.arc(11, -50, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-    }
-
-    // Boundary stakes
-    for (const [sx, sy] of [
-      [-84, 18],
-      [84, 18],
-      [-126, 100],
-      [126, 100],
-    ]) {
-      ctx.fillStyle = FOREST;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 8.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#FFFFFF';
-      ctx.beginPath();
-      ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = EMERALD;
-      ctx.beginPath();
-      ctx.arc(sx, sy, 2.2, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    // Location Pin hovering over parcel center
-    ctx.strokeStyle = EMERALD;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.ellipse(0, 43, 38, 13, 0, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = FOREST;
-    ctx.beginPath();
-    ctx.arc(0, -64, 36, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(-30.6, -47.8);
-    ctx.lineTo(0, 36);
-    ctx.lineTo(30.6, -47.8);
-    ctx.closePath();
-    ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.arc(0, -64, 17, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = EMERALD;
-    ctx.beginPath();
-    ctx.arc(0, -64, 9, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    // Meridian vertical divider with emerald diamonds
-    const divInset = Math.min(34, layout.detailsCard.height * 0.12);
-    ctx.strokeStyle = FOREST;
-    ctx.lineWidth = 4.5;
-    ctx.beginPath();
-    ctx.moveTo(layout.dividerX, layout.detailsCard.top + divInset);
-    ctx.lineTo(layout.dividerX, layout.detailsCard.bottom - divInset);
-    ctx.stroke();
-    drawDiamondMarker(ctx, layout.dividerX, layout.detailsCard.top + divInset, 7.5, EMERALD, '#FFFFFF');
-    drawDiamondMarker(ctx, layout.dividerX, layout.detailsCard.bottom - divInset, 7.5, EMERALD, '#FFFFFF');
-
-    // Dynamic Details Styled Text
-    ctx.fillStyle = PINE_TEXT;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    let drawY = layout.textBox.top + (!chosenFit.overflowed ? Math.max(0, (layout.textBox.height - chosenFit.totalH) / 2) : 0);
-    for (let gi = 0; gi < chosenFit.wrapped.length; gi++) {
-      for (const lineTokens of chosenFit.wrapped[gi]) {
-        if (drawY + chosenFit.lineH > layout.textBox.top + layout.textBox.height + 10) break;
-        let runX = layout.textBox.left;
-        for (const tok of lineTokens) {
-          ctx.font = buildCanvasFont(chosenFit.fontSize, tok.bold, tok.italic);
-          ctx.fillText(tok.text, runX, drawY);
-          runX += ctx.measureText(tok.text).width;
-        }
-        drawY += chosenFit.lineH;
-      }
-      if (gi < chosenFit.wrapped.length - 1) drawY += chosenFit.paraGap;
-    }
-
-    // Bottom Framed Forest Green Contact Card + Rounded-Square Shield Phone Badge
-    ctx.fillStyle = FOREST;
-    ctx.beginPath();
-    ctx.roundRect(layout.contactRect.left, layout.contactRect.top, layout.contactRect.width, layout.contactRect.height, 22);
-    ctx.fill();
-
-    ctx.fillStyle = EMERALD;
-    ctx.beginPath();
-    ctx.roundRect(layout.contactRect.left + 260, layout.contactRect.top + 8, layout.contactRect.width - 324, 5, 2.5);
-    ctx.fill();
-
-    const contactMidY = (layout.contactRect.top + layout.contactRect.bottom) / 2;
-    const badgeSize = Math.min(116, layout.contactRect.height * 0.68);
-    const badgeCx = layout.contactRect.left + 108;
-    const badgeLeft = badgeCx - badgeSize / 2;
-    const badgeTop = contactMidY - badgeSize / 2;
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.roundRect(badgeLeft, badgeTop, badgeSize, badgeSize, 24);
-    ctx.fill();
-    ctx.strokeStyle = '#86EFAC';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.roundRect(badgeLeft + 5, badgeTop + 5, badgeSize - 10, badgeSize - 10, 19);
-    ctx.stroke();
-
-    ctx.save();
-    ctx.translate(badgeCx, contactMidY);
-    ctx.scale((badgeSize * 0.50) / 56, (badgeSize * 0.50) / 56);
-    ctx.fillStyle = FOREST;
-    drawHandsetPath(ctx);
-    ctx.restore();
-
-    const cDivX = layout.contactRect.left + 206;
-    const cDivInset = Math.min(28, layout.contactRect.height * 0.16);
-    ctx.strokeStyle = '#A7F3D0';
-    ctx.lineWidth = 4.5;
-    ctx.beginPath();
-    ctx.moveTo(cDivX, layout.contactRect.top + cDivInset);
-    ctx.lineTo(cDivX, layout.contactRect.bottom - cDivInset);
-    ctx.stroke();
-
-    const mobAreaLeft = cDivX + 30;
-    const mobAreaW = layout.contactRect.right - 36 - mobAreaLeft;
-    ctx.font = `bold ${FIXED_CONTACT_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    ctx.fillStyle = '#FFFFFF';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(`যোগাযোগ: ${record.mobile}`, mobAreaLeft + mobAreaW / 2, contactMidY);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-  }
-
-  return canvas.toDataURL('image/jpeg', 0.92);
-}
-
-function validatePhone(value: string): string | null {
-  const trimmed = value.trim();
-  if (!trimmed) return 'Please enter a mobile number';
-  let digits = 0;
-  for (const ch of trimmed) {
-    if (ch >= '0' && ch <= '9') digits += 1;
-    else if (!['+', '-', ' ', '(', ')'].includes(ch)) return 'Enter a valid phone number';
-  }
-  if (digits < 5) return 'Enter at least 5 digits';
-  return null;
+  return map;
 }
 
 const DEFAULT_STATE: SimulatorState = {
@@ -1208,36 +122,48 @@ export default function App() {
     return DEFAULT_STATE;
   });
 
-  const [activeTab, setActiveTab] = useState<NavTab>('collect');
+  const [activeScreen, setActiveScreen] = useState<ActiveScreen>('collect');
+  const [activeCategory, setActiveCategory] = useState<CategoryCode>('HOUSE_FOR_RENT');
   const [filesSubTab, setFilesSubTab] = useState<FilesSubTab>('records');
   const [activeLocalDate, setActiveLocalDate] = useState<string>(() => getLocalDateStr());
 
-  // Preserved form inputs across tab switches
-  const [houseMobile, setHouseMobile] = useState('');
-  const [houseDetails, setHouseDetails] = useState('');
-  const [houseErrors, setHouseErrors] = useState<{ mobile?: string; details?: string }>({});
+  const [houseForm, setHouseForm] = useState<Record<string, PropertyFieldValue>>(() =>
+    createInitialFormMap('HOUSE_FOR_RENT')
+  );
+  const [landForm, setLandForm] = useState<Record<string, PropertyFieldValue>>(() =>
+    createInitialFormMap('LAND_FOR_SALE')
+  );
+  const [houseErrors, setHouseErrors] = useState<Record<string, string>>({});
+  const [landErrors, setLandErrors] = useState<Record<string, string>>({});
+  const [houseResetToken, setHouseResetToken] = useState(0);
+  const [landResetToken, setLandResetToken] = useState(0);
+  const [submittingCategory, setSubmittingCategory] = useState<CategoryCode | null>(null);
 
-  const [landMobile, setLandMobile] = useState('');
-  const [landDetails, setLandDetails] = useState('');
-  const [landErrors, setLandErrors] = useState<{ mobile?: string; details?: string }>({});
+  const swipeStartXRef = useRef<number | null>(null);
 
   const [selectedTxtFile, setSelectedTxtFile] = useState<{
     category: CategoryCode;
     fileName: string;
   } | null>(null);
   const [previewPoster, setPreviewPoster] = useState<PosterEntry | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{
+    category: CategoryCode;
+    recordId: string;
+    fileName?: string;
+    sourceTxtFile: string;
+  } | null>(null);
+
   const [includeTxtInZip, setIncludeTxtInZip] = useState(false);
   const [zipFilterCat, setZipFilterCat] = useState<'ALL' | CategoryCode>('ALL');
   const [zipDateFilter, setZipDateFilter] = useState<string>('ALL');
 
-  const [bulkProgress, setBulkProgress] = useState<{
-    total: number;
-    skipped: number;
-    succeeded: number;
-    invalid: number;
-    duplicateSkipped: number;
-    running: boolean;
-  }>({ total: 0, skipped: 0, succeeded: 0, invalid: 0, duplicateSkipped: 0, running: false });
+  const [bulkProgress, setBulkProgress] = useState({
+    total: 0,
+    skipped: 0,
+    succeeded: 0,
+    invalid: 0,
+    duplicateSkipped: 0,
+  });
 
   const [importSummary, setImportSummary] = useState<{
     fileCount: number;
@@ -1262,7 +188,6 @@ export default function App() {
     isHouse: boolean;
   } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
-  const lastTapRef = useRef<{ house: number; land: number }>({ house: 0, land: 0 });
 
   useEffect(() => {
     try {
@@ -1280,7 +205,7 @@ export default function App() {
     toastTimerRef.current = window.setTimeout(() => {
       setTopToast(null);
       toastTimerRef.current = null;
-    }, 2500);
+    }, 2600);
   }
 
   const allRecords = useMemo(() => {
@@ -1301,34 +226,40 @@ export default function App() {
 
   function handleSubmit(category: CategoryCode, e: React.FormEvent) {
     e.preventDefault();
+    if (submittingCategory !== null) return;
+
     const isHouse = category === 'HOUSE_FOR_RENT';
-    const nowMs = Date.now();
-    if (nowMs - (isHouse ? lastTapRef.current.house : lastTapRef.current.land) < 650) return;
+    const configs = getFieldsForCategory(category);
+    const currentForm = isHouse ? houseForm : landForm;
+    const errors: Record<string, string> = {};
 
-    const mobile = isHouse ? houseMobile : landMobile;
-    const details = isHouse ? houseDetails : landDetails;
-    const mobileErr = validatePhone(mobile);
-    const detailsErr = !details.trim() ? 'Please enter property details' : undefined;
+    for (const cfg of configs) {
+      const text = (currentForm[cfg.fieldId]?.plainText ?? '').trim();
+      if (cfg.required && !text) {
+        errors[cfg.fieldId] = `${cfg.label} অবশ্যই লিখুন`;
+      } else if (cfg.fieldId === 'mobile' && !isValidBangladeshiMobile(text)) {
+        errors[cfg.fieldId] = 'সঠিক ১১ ডিজিটের মোবাইল নম্বর লিখুন (01XXXXXXXXX)';
+      }
+    }
 
-    if (mobileErr || detailsErr) {
-      if (isHouse) setHouseErrors({ mobile: mobileErr ?? undefined, details: detailsErr });
-      else setLandErrors({ mobile: mobileErr ?? undefined, details: detailsErr });
+    if (Object.keys(errors).length > 0) {
+      if (isHouse) setHouseErrors(errors);
+      else setLandErrors(errors);
       return;
     }
 
-    if (isHouse) {
-      setHouseErrors({});
-      lastTapRef.current.house = nowMs;
-    } else {
-      setLandErrors({});
-      lastTapRef.current.land = nowMs;
-    }
+    if (isHouse) setHouseErrors({});
+    else setLandErrors({});
+    setSubmittingCategory(category);
 
-    const nextSeq = (isHouse ? state.houseSeq : state.landSeq) + 1;
-    const prefix = isHouse ? 'HOUSE_' : 'LAND_';
-    const recordId = `${prefix}${String(nextSeq).padStart(6, '0')}`;
+    const fieldValues = configs.map((cfg) => currentForm[cfg.fieldId]);
+    const titleVal = (currentForm.title?.plainText ?? '').trim() || getDefaultTitle(category);
+    const mobileVal = (currentForm.mobile?.plainText ?? '').trim();
+
     const dateStr = activeLocalDate || getLocalDateStr();
     const timeStr = getLocalTimeStr();
+    const nextSeq = (isHouse ? state.houseSeq : state.landSeq) + 1;
+    const recordId = buildDatedRecordId(category, dateStr, nextSeq);
     const fileName = `${dateStr}.txt`;
 
     const newRecord: PropertyRecord = {
@@ -1336,62 +267,127 @@ export default function App() {
       date: dateStr,
       time: timeStr,
       category,
-      mobile: mobile.trim(),
-      details,
+      title: titleVal,
+      mobile: mobileVal,
+      details: buildHumanReadableSummary(category, fieldValues),
+      fieldValues,
       sourceFileName: fileName,
     };
 
     const existingTxt = isHouse ? state.houseFiles[fileName] ?? '' : state.landFiles[fileName] ?? '';
     const updatedTxt = appendRecord(existingTxt, newRecord);
 
-    let generatedPoster: PosterEntry | null = null;
-    if (state.autoJpgOnSubmit) {
-      const posterName = buildPosterFileName(category, recordId);
-      const dataUrl = renderPosterDataUrl(newRecord);
-      generatedPoster = {
-        recordId,
-        fileName: posterName,
-        category,
-        date: dateStr,
-        sourceTxtFile: fileName,
-        dataUrl,
-        createdAt: Date.now(),
-      };
+    // Clear form right after TXT save succeeds (matches Android TXT-first pipeline)
+    if (isHouse) {
+      setHouseForm(createInitialFormMap('HOUSE_FOR_RENT'));
+      setHouseResetToken((n) => n + 1);
+    } else {
+      setLandForm(createInitialFormMap('LAND_FOR_SALE'));
+      setLandResetToken((n) => n + 1);
     }
 
+    window.setTimeout(() => {
+      let generatedPoster: PosterEntry | null = null;
+      if (state.autoJpgOnSubmit) {
+        const posterName = buildPosterFileName(category, recordId);
+        const dataUrl = renderPortraitPosterDataUrl(newRecord);
+        generatedPoster = {
+          recordId,
+          fileName: posterName,
+          category,
+          date: dateStr,
+          time: timeStr,
+          sourceTxtFile: fileName,
+          dataUrl,
+          createdAt: Date.now(),
+        };
+      }
+
+      setState((prev) => ({
+        ...prev,
+        houseSeq: isHouse ? nextSeq : prev.houseSeq,
+        landSeq: !isHouse ? nextSeq : prev.landSeq,
+        houseFiles: isHouse
+          ? { ...prev.houseFiles, [fileName]: updatedTxt }
+          : prev.houseFiles,
+        landFiles: !isHouse
+          ? { ...prev.landFiles, [fileName]: updatedTxt }
+          : prev.landFiles,
+        posters: generatedPoster
+          ? { ...prev.posters, [`${category}|${recordId}`]: generatedPoster }
+          : prev.posters,
+      }));
+
+      setSelectedTxtFile({ category, fileName });
+      setSubmittingCategory(null);
+
+      showTopToast(
+        generatedPoster
+          ? 'Property saved and poster generated successfully!'
+          : `${recordId} Saved to TXT`,
+        generatedPoster
+          ? `${recordId} • ${generatedPoster.fileName}`
+          : `Property Hub/${isHouse ? 'House for Rent' : 'Land for Sale'}/${fileName}`,
+        isHouse
+      );
+    }, 180);
+  }
+
+  function handleConfirmDelete() {
+    if (!deleteTarget) return;
+    const { category, recordId } = deleteTarget;
+    const isHouse = category === 'HOUSE_FOR_RENT';
+
+    setState((prev) => {
+      const sourceFiles = isHouse ? { ...prev.houseFiles } : { ...prev.landFiles };
+      for (const [fn, content] of Object.entries(sourceFiles)) {
+        const res = removeRecordFromTxt(content, recordId);
+        if (res.removed) {
+          if (res.updated.trim()) {
+            sourceFiles[fn] = res.updated;
+          } else {
+            delete sourceFiles[fn];
+          }
+          break;
+        }
+      }
+      const nextPosters = { ...prev.posters };
+      delete nextPosters[`${category}|${recordId}`];
+      return {
+        ...prev,
+        houseFiles: isHouse ? sourceFiles : prev.houseFiles,
+        landFiles: !isHouse ? sourceFiles : prev.landFiles,
+        posters: nextPosters,
+      };
+    });
+
+    if (previewPoster && previewPoster.recordId === recordId) {
+      setPreviewPoster(null);
+    }
+    setDeleteTarget(null);
+    showTopToast(`Deleted ${recordId}`, 'Poster and TXT record removed cleanly', isHouse);
+  }
+
+  function handleRegeneratePoster(poster: PosterEntry) {
+    const match = allRecords.find(
+      (r) => r.category === poster.category && r.recordId === poster.recordId
+    );
+    if (!match) {
+      showTopToast('Source TXT Not Found', `No TXT record found for ${poster.recordId}`, false);
+      return;
+    }
+    const dataUrl = renderPortraitPosterDataUrl(match);
+    const updated: PosterEntry = {
+      ...poster,
+      dataUrl,
+      time: match.time,
+      createdAt: Date.now(),
+    };
     setState((prev) => ({
       ...prev,
-      houseSeq: isHouse ? nextSeq : prev.houseSeq,
-      landSeq: !isHouse ? nextSeq : prev.landSeq,
-      houseFiles: isHouse
-        ? { ...prev.houseFiles, [fileName]: updatedTxt }
-        : prev.houseFiles,
-      landFiles: !isHouse
-        ? { ...prev.landFiles, [fileName]: updatedTxt }
-        : prev.landFiles,
-      posters: generatedPoster
-        ? { ...prev.posters, [`${category}|${recordId}`]: generatedPoster }
-        : prev.posters,
+      posters: { ...prev.posters, [`${poster.category}|${poster.recordId}`]: updated },
     }));
-
-    setSelectedTxtFile({ category, fileName });
-    if (isHouse) {
-      setHouseMobile('');
-      setHouseDetails('');
-    } else {
-      setLandMobile('');
-      setLandDetails('');
-    }
-
-    showTopToast(
-      generatedPoster
-        ? 'Property saved and poster generated successfully!'
-        : `${recordId} Saved to TXT`,
-      generatedPoster
-        ? `${recordId} • ${generatedPoster.fileName}`
-        : `Property Hub/${isHouse ? 'House for Rent' : 'Land for Sale'}/${fileName}`,
-      isHouse
-    );
+    showTopToast('Poster Regenerated', poster.fileName, poster.category === 'HOUSE_FOR_RENT');
   }
 
   async function handleImportTxtFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
@@ -1484,12 +480,13 @@ export default function App() {
         skipped += 1;
         continue;
       }
-      const dataUrl = renderPosterDataUrl(rec);
+      const dataUrl = renderPortraitPosterDataUrl(rec);
       newPosters[posterKey] = {
         recordId: rec.recordId,
         fileName: buildPosterFileName(rec.category, rec.recordId),
         category: rec.category,
         date: rec.date,
+        time: rec.time,
         sourceTxtFile: rec.sourceFileName,
         dataUrl,
         createdAt: Date.now() + succeeded,
@@ -1504,16 +501,9 @@ export default function App() {
       succeeded,
       invalid: importSummary.invalidCount,
       duplicateSkipped: importSummary.duplicateSkipped,
-      running: false,
     });
     setImportSummary((prev) =>
-      prev
-        ? {
-            ...prev,
-            alreadyGenerated: skipped,
-            pendingRecords: [],
-          }
-        : null
+      prev ? { ...prev, alreadyGenerated: skipped, pendingRecords: [] } : null
     );
     showTopToast('Missing Posters Generated', `${succeeded} created, ${skipped} skipped`, true);
   }
@@ -1534,12 +524,13 @@ export default function App() {
         skipped += 1;
         continue;
       }
-      const dataUrl = renderPosterDataUrl(rec);
+      const dataUrl = renderPortraitPosterDataUrl(rec);
       newPosters[key] = {
         recordId: rec.recordId,
         fileName: buildPosterFileName(rec.category, rec.recordId),
         category: rec.category,
         date: rec.date,
+        time: rec.time,
         sourceTxtFile: rec.sourceFileName,
         dataUrl,
         createdAt: Date.now() + succeeded,
@@ -1554,7 +545,6 @@ export default function App() {
       succeeded,
       invalid: 0,
       duplicateSkipped: 0,
-      running: false,
     });
     showTopToast(
       'Bulk Generation Complete',
@@ -1642,11 +632,16 @@ export default function App() {
       : state.landFiles[selectedTxtFile.fileName]
     : null;
 
+  const currentConfigs = getFieldsForCategory(activeCategory);
+  const currentForm = activeCategory === 'HOUSE_FOR_RENT' ? houseForm : landForm;
+  const currentErrors = activeCategory === 'HOUSE_FOR_RENT' ? houseErrors : landErrors;
+  const currentResetToken = activeCategory === 'HOUSE_FOR_RENT' ? houseResetToken : landResetToken;
+
   return (
     <div className="min-h-screen bg-[#EEF3FB] text-[#0B1F44]">
       <div className="mx-auto max-w-7xl px-4 py-6 lg:px-8">
         <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
-          {/* LEFT: 3-TAB MOBILE PREVIEW */}
+          {/* LEFT: MOBILE PREVIEW (NO BOTTOM NAV — TOP HEADER FILES & SETTINGS + SWIPEABLE TABS) */}
           <div className="lg:col-span-5">
             <div
               className={`relative mx-auto flex h-[800px] max-w-[420px] flex-col overflow-hidden rounded-[28px] shadow-xl ring-1 ${phoneSurface}`}
@@ -1675,143 +670,207 @@ export default function App() {
                 )}
               </div>
 
-              {/* Consistent Property Hub Top Header */}
-              <header className="shrink-0 rounded-b-[24px] bg-gradient-to-r from-[#062D80] to-[#0D47B8] px-4 py-3.5 text-white shadow-sm">
+              {/* Top Header with Brand Logo + Generated Files + Settings */}
+              <header className="shrink-0 rounded-b-[24px] bg-gradient-to-r from-[#062D80] to-[#0D47B8] px-4 py-3 text-white shadow-sm">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="flex h-10 w-10 items-center justify-center">
-                    <Home className="h-8 w-8 text-white" />
-                  </div>
-                  <div className="text-center">
-                    <h1 className="text-[22px] font-bold leading-tight text-white">
-                      Property Hub
-                    </h1>
-                    <p className="mt-0.5 text-[11.5px] tracking-wide text-[#D7E4FF]">
-                      Collect • Generate • Share
-                    </p>
-                  </div>
                   <button
                     type="button"
-                    onClick={() => setActiveTab('settings')}
-                    aria-label="Settings"
-                    className="flex h-10 w-10 items-center justify-center rounded-full text-white hover:bg-white/15"
+                    onClick={() => setActiveScreen('collect')}
+                    className="flex h-10 w-10 items-center justify-center rounded-full hover:bg-white/10"
+                    aria-label="Property Hub Home"
                   >
-                    <Settings className="h-5 w-5" />
+                    <Home className="h-7 w-7 text-white" />
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveScreen('collect')}
+                    className="flex-1 text-center"
+                  >
+                    <h1 className="text-[21px] font-bold leading-tight text-white">
+                      Property Hub
+                    </h1>
+                    <p className="mt-0.5 text-[11px] tracking-wide text-[#D7E4FF]">
+                      Collect • Generate • Share
+                    </p>
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveScreen(activeScreen === 'files' ? 'collect' : 'files')
+                      }
+                      aria-label="Generated Files"
+                      className={`flex h-9 w-9 items-center justify-center rounded-full text-white transition-colors ${
+                        activeScreen === 'files' ? 'bg-white/25' : 'hover:bg-white/15'
+                      }`}
+                    >
+                      <FolderOpen className="h-5 w-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setActiveScreen(activeScreen === 'settings' ? 'collect' : 'settings')
+                      }
+                      aria-label="Settings"
+                      className={`flex h-9 w-9 items-center justify-center rounded-full text-white transition-colors ${
+                        activeScreen === 'settings' ? 'bg-white/25' : 'hover:bg-white/15'
+                      }`}
+                    >
+                      <Settings className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
               </header>
 
-              {/* Active Fragment Content */}
-              <div className="min-h-0 flex-1 overflow-y-auto">
-                {activeTab === 'collect' && (
-                  <div className="space-y-4 p-3.5">
-                    {/* HOUSE FOR RENT */}
-                    <section className={`overflow-hidden rounded-[20px] border shadow-sm ${cardSurface}`}>
-                      <div className="flex h-[74px] items-center bg-gradient-to-r from-[#06328E] to-[#1565C0] px-4 text-white">
-                        <Home className="h-7 w-7" />
-                        <div className="mx-3 h-9 w-px bg-white/40" />
-                        <div>
-                          <h2 className="text-[16px] font-bold tracking-wide">HOUSE FOR RENT</h2>
-                          <p className="text-[12px] text-[#D7E4FF]">Find the right tenant</p>
-                        </div>
-                      </div>
-                      <form onSubmit={(e) => handleSubmit('HOUSE_FOR_RENT', e)} className="space-y-3 p-4">
-                        <div>
-                          <label className="mb-1 block text-[13px] font-bold">Mobile Number</label>
-                          <div className="relative">
-                            <Phone className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-blue-600" />
-                            <input
-                              type="tel"
-                              value={houseMobile}
-                              onChange={(e) => setHouseMobile(e.target.value)}
-                              placeholder="Enter mobile number"
-                              className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[13.5px] focus:border-blue-600 focus:outline-none ${inputSurface}`}
-                            />
-                          </div>
-                          {houseErrors.mobile && (
-                            <p className="mt-1 text-xs text-red-500">{houseErrors.mobile}</p>
-                          )}
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[13px] font-bold">Details</label>
-                          <textarea
-                            rows={3}
-                            value={houseDetails}
-                            onChange={(e) => setHouseDetails(e.target.value)}
-                            placeholder="Enter address, location, monthly rent, bedrooms, facilities, floor info, etc."
-                            className={`w-full resize-none rounded-xl border p-3 text-[13.5px] focus:border-blue-600 focus:outline-none ${inputSurface}`}
-                          />
-                          {houseErrors.details && (
-                            <p className="mt-1 text-xs text-red-500">{houseErrors.details}</p>
-                          )}
-                        </div>
-                        <button
-                          type="submit"
-                          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0B41AD] text-[14px] font-bold text-white hover:bg-[#093691]"
-                        >
-                          <Send className="h-4 w-4" />
-                          <span>Submit House for Rent</span>
-                        </button>
-                      </form>
-                    </section>
+              {/* Main Screen Container */}
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {activeScreen === 'collect' && (
+                  <div className="flex h-full flex-col">
+                    {/* Clickable + Swipeable 2-Category Tab Switcher */}
+                    <div className={`grid shrink-0 grid-cols-2 border-b ${cardSurface}`}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveCategory('HOUSE_FOR_RENT')}
+                        className={`border-b-[3px] py-2.5 text-[13px] font-bold transition-colors ${
+                          activeCategory === 'HOUSE_FOR_RENT'
+                            ? 'border-[#0B41AD] text-[#0B41AD]'
+                            : 'border-transparent opacity-60'
+                        }`}
+                      >
+                        House for Rent
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveCategory('LAND_FOR_SALE')}
+                        className={`border-b-[3px] py-2.5 text-[13px] font-bold transition-colors ${
+                          activeCategory === 'LAND_FOR_SALE'
+                            ? 'border-[#0B8A38] text-[#0B8A38]'
+                            : 'border-transparent opacity-60'
+                        }`}
+                      >
+                        Land for Sale
+                      </button>
+                    </div>
 
-                    {/* LAND FOR SALE */}
-                    <section className={`overflow-hidden rounded-[20px] border shadow-sm ${cardSurface}`}>
-                      <div className="flex h-[74px] items-center bg-gradient-to-r from-[#007E2F] to-[#14AE47] px-4 text-white">
-                        <MapPin className="h-7 w-7" />
-                        <div className="mx-3 h-9 w-px bg-white/40" />
-                        <div>
-                          <h2 className="text-[16px] font-bold tracking-wide">LAND FOR SALE</h2>
-                          <p className="text-[12px] text-[#E3FFE9]">Sell Your Land Easily</p>
-                        </div>
-                      </div>
-                      <form onSubmit={(e) => handleSubmit('LAND_FOR_SALE', e)} className="space-y-3 p-4">
-                        <div>
-                          <label className="mb-1 block text-[13px] font-bold">Mobile Number</label>
-                          <div className="relative">
-                            <Phone className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-emerald-600" />
-                            <input
-                              type="tel"
-                              value={landMobile}
-                              onChange={(e) => setLandMobile(e.target.value)}
-                              placeholder="Enter mobile number"
-                              className={`h-10 w-full rounded-xl border pl-9 pr-3 text-[13.5px] focus:border-emerald-600 focus:outline-none ${inputSurface}`}
-                            />
-                          </div>
-                          {landErrors.mobile && (
-                            <p className="mt-1 text-xs text-red-500">{landErrors.mobile}</p>
-                          )}
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-[13px] font-bold">Details</label>
-                          <textarea
-                            rows={3}
-                            value={landDetails}
-                            onChange={(e) => setLandDetails(e.target.value)}
-                            placeholder="Enter location, land area, price, road access, land type, facilities, etc."
-                            className={`w-full resize-none rounded-xl border p-3 text-[13.5px] focus:border-emerald-600 focus:outline-none ${inputSurface}`}
-                          />
-                          {landErrors.details && (
-                            <p className="mt-1 text-xs text-red-500">{landErrors.details}</p>
-                          )}
-                        </div>
-                        <button
-                          type="submit"
-                          className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0B8A38] text-[14px] font-bold text-white hover:bg-[#09732E]"
+                    {/* Swipeable Form Page Area */}
+                    <div
+                      className="min-h-0 flex-1 overflow-y-auto p-3.5"
+                      onTouchStart={(e) => {
+                        swipeStartXRef.current = e.touches[0]?.clientX ?? null;
+                      }}
+                      onTouchEnd={(e) => {
+                        if (swipeStartXRef.current === null) return;
+                        const endX = e.changedTouches[0]?.clientX ?? swipeStartXRef.current;
+                        const dx = endX - swipeStartXRef.current;
+                        swipeStartXRef.current = null;
+                        if (dx < -60) setActiveCategory('LAND_FOR_SALE');
+                        else if (dx > 60) setActiveCategory('HOUSE_FOR_RENT');
+                      }}
+                    >
+                      <section className={`overflow-hidden rounded-[20px] border shadow-sm ${cardSurface}`}>
+                        <div
+                          className={`flex h-[74px] items-center px-4 text-white ${
+                            activeCategory === 'HOUSE_FOR_RENT'
+                              ? 'bg-gradient-to-r from-[#06328E] to-[#1565C0]'
+                              : 'bg-gradient-to-r from-[#007E2F] to-[#14AE47]'
+                          }`}
                         >
-                          <Send className="h-4 w-4" />
-                          <span>Submit Land for Sale</span>
-                        </button>
-                      </form>
-                    </section>
+                          {activeCategory === 'HOUSE_FOR_RENT' ? (
+                            <Home className="h-7 w-7" />
+                          ) : (
+                            <MapPin className="h-7 w-7" />
+                          )}
+                          <div className="mx-3 h-9 w-px bg-white/40" />
+                          <div>
+                            <h2 className="text-[16px] font-bold tracking-wide">
+                              {activeCategory === 'HOUSE_FOR_RENT'
+                                ? 'HOUSE FOR RENT'
+                                : 'LAND FOR SALE'}
+                            </h2>
+                            <p
+                              className={`text-[12px] ${
+                                activeCategory === 'HOUSE_FOR_RENT'
+                                  ? 'text-[#D7E4FF]'
+                                  : 'text-[#E3FFE9]'
+                              }`}
+                            >
+                              {activeCategory === 'HOUSE_FOR_RENT'
+                                ? 'Find the right tenant'
+                                : 'Sell Your Land Easily'}
+                            </p>
+                          </div>
+                        </div>
+
+                        <form
+                          onSubmit={(e) => handleSubmit(activeCategory, e)}
+                          className="space-y-3 p-4"
+                        >
+                          {currentConfigs.map((cfg) => (
+                            <RichFieldInput
+                              key={`${activeCategory}-${cfg.fieldId}`}
+                              fieldId={cfg.fieldId}
+                              label={cfg.label}
+                              required={cfg.required}
+                              multiline={cfg.inputType === 'MULTILINE'}
+                              formattable={cfg.formattable}
+                              inputType={cfg.inputType}
+                              placeholder={cfg.placeholder}
+                              accent={activeCategory === 'HOUSE_FOR_RENT' ? 'blue' : 'green'}
+                              value={currentForm[cfg.fieldId]}
+                              resetToken={currentResetToken}
+                              error={currentErrors[cfg.fieldId]}
+                              inputSurfaceClass={inputSurface}
+                              onChange={(next) => {
+                                if (activeCategory === 'HOUSE_FOR_RENT') {
+                                  setHouseForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
+                                } else {
+                                  setLandForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
+                                }
+                              }}
+                            />
+                          ))}
+
+                          <button
+                            type="submit"
+                            disabled={submittingCategory !== null}
+                            className={`flex h-11 w-full items-center justify-center gap-2 rounded-xl text-[14px] font-bold text-white transition-opacity disabled:opacity-70 ${
+                              activeCategory === 'HOUSE_FOR_RENT'
+                                ? 'bg-[#0B41AD] hover:bg-[#093691]'
+                                : 'bg-[#0B8A38] hover:bg-[#09732E]'
+                            }`}
+                          >
+                            {submittingCategory === activeCategory ? (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                <span>
+                                  {state.autoJpgOnSubmit
+                                    ? 'Saving & Generating Poster…'
+                                    : 'Saving…'}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <Send className="h-4 w-4" />
+                                <span>
+                                  {activeCategory === 'HOUSE_FOR_RENT'
+                                    ? 'Submit House for Rent'
+                                    : 'Submit Land for Sale'}
+                                </span>
+                              </>
+                            )}
+                          </button>
+                        </form>
+                      </section>
+                    </div>
                   </div>
                 )}
 
-                {activeTab === 'settings' && (
-                  <div className="space-y-3 p-4">
+                {activeScreen === 'settings' && (
+                  <div className="h-full space-y-3 overflow-y-auto p-4">
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => setActiveTab('collect')}
+                        onClick={() => setActiveScreen('collect')}
                         className="rounded-lg p-1.5 hover:bg-black/5"
                         aria-label="Back"
                       >
@@ -1837,7 +896,7 @@ export default function App() {
                       <div className="min-w-0 flex-1">
                         <p className="text-[14px] font-bold">Auto JPG Image by Submit</p>
                         <p className="text-[11.5px] opacity-75">
-                          Automatically generate a poster after every submission.
+                          Automatically generate a 3:4 poster after every submission.
                         </p>
                       </div>
                       <button
@@ -1905,14 +964,9 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="rounded-xl bg-blue-500/10 px-3.5 py-2.5 text-[11.5px] leading-relaxed">
-                      Each submission will be saved in TXT file and optionally generate JPG poster
-                      based on your settings.
-                    </div>
-
                     <button
                       type="button"
-                      onClick={() => setActiveTab('collect')}
+                      onClick={() => setActiveScreen('collect')}
                       className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#0B41AD] text-sm font-bold text-white"
                     >
                       <span>Back to Home</span>
@@ -1920,9 +974,21 @@ export default function App() {
                   </div>
                 )}
 
-                {activeTab === 'files' && (
+                {activeScreen === 'files' && (
                   <div className="flex h-full flex-col">
-                    <div className={`grid grid-cols-4 border-b text-[11.5px] font-semibold ${cardSurface}`}>
+                    <div className={`flex shrink-0 items-center gap-2 border-b px-3 py-2 ${cardSurface}`}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveScreen('collect')}
+                        className="rounded-lg p-1 hover:bg-black/5"
+                        aria-label="Back to Home"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                      </button>
+                      <h2 className="text-[15px] font-bold">Generated Files</h2>
+                    </div>
+
+                    <div className={`grid shrink-0 grid-cols-4 border-b text-[11.5px] font-semibold ${cardSurface}`}>
                       {(
                         [
                           ['records', 'Records'],
@@ -1946,7 +1012,7 @@ export default function App() {
                       ))}
                     </div>
 
-                    <div className="flex-1 space-y-3 overflow-y-auto p-3.5">
+                    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-3.5">
                       {filesSubTab === 'records' && (
                         <>
                           {allRecords.length === 0 ? (
@@ -1955,9 +1021,8 @@ export default function App() {
                             </p>
                           ) : (
                             allRecords.map((rec) => {
-                              const hasPoster = Boolean(
-                                state.posters[`${rec.category}|${rec.recordId}`]
-                              );
+                              const poster = state.posters[`${rec.category}|${rec.recordId}`];
+                              const hasPoster = Boolean(poster);
                               return (
                                 <div
                                   key={rec.recordId}
@@ -1973,9 +1038,15 @@ export default function App() {
                                     >
                                       {rec.recordId}
                                     </span>
-                                    <span className="opacity-70">{rec.date}</span>
+                                    <span className="opacity-70">
+                                      {rec.date}
+                                      {rec.time ? ` · ${rec.time}` : ''}
+                                    </span>
                                   </div>
-                                  <p className="mt-1 text-xs font-semibold">{rec.mobile}</p>
+                                  <p className="mt-1 text-xs font-bold">{rec.title}</p>
+                                  <p className="mt-0.5 text-xs font-semibold opacity-85">
+                                    {rec.mobile}
+                                  </p>
                                   <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-xs opacity-75">
                                     {rec.details}
                                   </p>
@@ -1983,50 +1054,62 @@ export default function App() {
                                     <span className={hasPoster ? 'text-emerald-600' : 'text-amber-600'}>
                                       {hasPoster ? 'Poster Ready' : 'Poster Missing'}
                                     </span>
-                                    {!hasPoster ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          const dataUrl = renderPosterDataUrl(rec);
-                                          const entry: PosterEntry = {
-                                            recordId: rec.recordId,
-                                            fileName: buildPosterFileName(rec.category, rec.recordId),
-                                            category: rec.category,
-                                            date: rec.date,
-                                            sourceTxtFile: rec.sourceFileName,
-                                            dataUrl,
-                                            createdAt: Date.now(),
-                                          };
-                                          setState((prev) => ({
-                                            ...prev,
-                                            posters: {
-                                              ...prev.posters,
-                                              [`${rec.category}|${rec.recordId}`]: entry,
-                                            },
-                                          }));
-                                          showTopToast(
-                                            'Poster Generated',
-                                            entry.fileName,
-                                            rec.category === 'HOUSE_FOR_RENT'
-                                          );
-                                        }}
-                                        className="font-semibold text-blue-600 hover:underline"
-                                      >
-                                        Generate Poster
-                                      </button>
-                                    ) : (
+                                    <div className="flex items-center gap-3">
+                                      {!hasPoster ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            const dataUrl = renderPortraitPosterDataUrl(rec);
+                                            const entry: PosterEntry = {
+                                              recordId: rec.recordId,
+                                              fileName: buildPosterFileName(rec.category, rec.recordId),
+                                              category: rec.category,
+                                              date: rec.date,
+                                              time: rec.time,
+                                              sourceTxtFile: rec.sourceFileName,
+                                              dataUrl,
+                                              createdAt: Date.now(),
+                                            };
+                                            setState((prev) => ({
+                                              ...prev,
+                                              posters: {
+                                                ...prev.posters,
+                                                [`${rec.category}|${rec.recordId}`]: entry,
+                                              },
+                                            }));
+                                            showTopToast(
+                                              'Poster Generated',
+                                              entry.fileName,
+                                              rec.category === 'HOUSE_FOR_RENT'
+                                            );
+                                          }}
+                                          className="font-semibold text-blue-600 hover:underline"
+                                        >
+                                          Generate Poster
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => setPreviewPoster(poster)}
+                                          className="font-semibold text-blue-600 hover:underline"
+                                        >
+                                          View Poster
+                                        </button>
+                                      )}
                                       <button
                                         type="button"
                                         onClick={() =>
-                                          setPreviewPoster(
-                                            state.posters[`${rec.category}|${rec.recordId}`]
-                                          )
+                                          setDeleteTarget({
+                                            category: rec.category,
+                                            recordId: rec.recordId,
+                                            sourceTxtFile: rec.sourceFileName,
+                                          })
                                         }
-                                        className="font-semibold text-blue-600 hover:underline"
+                                        className="font-semibold text-red-600 hover:underline"
                                       >
-                                        View Poster
+                                        Delete
                                       </button>
-                                    )}
+                                    </div>
                                   </div>
                                 </div>
                               );
@@ -2048,8 +1131,8 @@ export default function App() {
                           <div className={`space-y-2.5 rounded-2xl border p-4 ${cardSurface}`}>
                             <h3 className="text-sm font-bold">Import Saved TXT Files</h3>
                             <p className="text-xs opacity-75">
-                              Works independently of Auto JPG. Existing valid posters are skipped by
-                              RECORD_ID without modifying source TXT files.
+                              Works independently of Auto JPG. Existing valid 3:4 posters are skipped
+                              by RECORD_ID without modifying source TXT files.
                             </p>
                             <button
                               type="button"
@@ -2129,7 +1212,7 @@ export default function App() {
                                 onClick={() => setFilesSubTab('posters')}
                                 className="h-9 rounded-xl bg-emerald-600 px-2 text-[11px] font-bold text-white"
                               >
-                                View Generated Posters ({postersList.length})
+                                View Posters ({postersList.length})
                               </button>
                               <button
                                 type="button"
@@ -2139,13 +1222,6 @@ export default function App() {
                                 Export as ZIP
                               </button>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => txtFileInputRef.current?.click()}
-                              className="h-8 w-full rounded-xl border border-slate-300 text-[11px] font-semibold"
-                            >
-                              Import More TXT Files
-                            </button>
                           </div>
                         </div>
                       )}
@@ -2165,7 +1241,8 @@ export default function App() {
                                 <img
                                   src={poster.dataUrl}
                                   alt={poster.fileName}
-                                  className="aspect-[4/3] w-full bg-slate-950 object-contain"
+                                  onClick={() => setPreviewPoster(poster)}
+                                  className="aspect-[3/4] max-h-60 w-full cursor-pointer bg-slate-950 object-contain"
                                 />
                                 <div className="p-3">
                                   <div className="flex items-center justify-between text-xs font-bold">
@@ -2177,14 +1254,20 @@ export default function App() {
                                           : 'text-emerald-600'
                                       }
                                     >
-                                      {poster.fileName}
+                                      {poster.category === 'HOUSE_FOR_RENT'
+                                        ? 'House for Rent'
+                                        : 'Land for Sale'}
                                     </span>
                                   </div>
-                                  <div className="mt-2 flex gap-2">
+                                  <p className="mt-0.5 text-[11px] opacity-70">
+                                    Date: {poster.date}
+                                    {poster.time ? ` · ${poster.time}` : ''} · {poster.fileName}
+                                  </p>
+                                  <div className="mt-2.5 grid grid-cols-2 gap-2">
                                     <button
                                       type="button"
                                       onClick={() => setPreviewPoster(poster)}
-                                      className="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-300 py-1.5 text-xs font-semibold"
+                                      className="flex items-center justify-center gap-1 rounded-lg border border-slate-300 py-1.5 text-xs font-semibold"
                                     >
                                       <Eye className="h-3.5 w-3.5" />
                                       <span>View</span>
@@ -2192,11 +1275,34 @@ export default function App() {
                                     <a
                                       href={poster.dataUrl}
                                       download={poster.fileName}
-                                      className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 py-1.5 text-xs font-semibold text-white"
+                                      className="flex items-center justify-center gap-1 rounded-lg bg-[#0B41AD] py-1.5 text-xs font-semibold text-white"
                                     >
                                       <Download className="h-3.5 w-3.5" />
                                       <span>Save JPG</span>
                                     </a>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRegeneratePoster(poster)}
+                                      className="flex items-center justify-center gap-1 rounded-lg border border-slate-300 py-1.5 text-xs font-semibold"
+                                    >
+                                      <RefreshCw className="h-3.5 w-3.5" />
+                                      <span>Regenerate</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDeleteTarget({
+                                          category: poster.category,
+                                          recordId: poster.recordId,
+                                          fileName: poster.fileName,
+                                          sourceTxtFile: poster.sourceTxtFile,
+                                        })
+                                      }
+                                      className="flex items-center justify-center gap-1 rounded-lg border border-red-300 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                      <span>Delete</span>
+                                    </button>
                                   </div>
                                 </div>
                               </div>
@@ -2263,46 +1369,6 @@ export default function App() {
                   </div>
                 )}
               </div>
-
-              {/* Persistent 3-Destination Bottom Navigation */}
-              <nav
-                className={`grid shrink-0 grid-cols-3 border-t py-1.5 text-[11px] font-semibold ${
-                  isDark
-                    ? 'border-slate-800 bg-[#0B1120] text-slate-400'
-                    : 'border-slate-200 bg-white text-slate-600'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('collect')}
-                  className={`flex flex-col items-center gap-0.5 py-1 ${
-                    activeTab === 'collect' ? 'text-blue-600' : ''
-                  }`}
-                >
-                  <Home className="h-5 w-5" />
-                  <span>Collect Data</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('settings')}
-                  className={`flex flex-col items-center gap-0.5 py-1 ${
-                    activeTab === 'settings' ? 'text-blue-600' : ''
-                  }`}
-                >
-                  <Settings className="h-5 w-5" />
-                  <span>Settings</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('files')}
-                  className={`flex flex-col items-center gap-0.5 py-1 ${
-                    activeTab === 'files' ? 'text-blue-600' : ''
-                  }`}
-                >
-                  <FolderOpen className="h-5 w-5" />
-                  <span>Generated Files</span>
-                </button>
-              </nav>
             </div>
           </div>
 
@@ -2315,8 +1381,8 @@ export default function App() {
                     Property Hub Offline Storage Inspector
                   </h2>
                   <p className="mt-0.5 text-sm text-slate-600">
-                    Simulates the exact Android SAF folder tree, daily TXT records, 1440×1080 4:3
-                    Canvas posters, and ZIP exports.
+                    Simulates the exact Android SAF folder tree, daily TXT records with rich field
+                    runs, 1440×1920 3:4 portrait Canvas posters, and ZIP exports.
                   </p>
                 </div>
                 <button
@@ -2429,7 +1495,7 @@ export default function App() {
                   </p>
                   <pre className="mt-3 max-h-[300px] overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-slate-200">
                     {activeTxtContent ??
-                      'Submit a property in the mobile preview to inspect the structured RECORD_ID / DATE / TIME / CATEGORY / MOBILE / DETAILS block.'}
+                      'Submit a property in the mobile preview to inspect the structured RECORD_ID / TITLE / MOBILE / FIELDS_JSON / DETAILS block.'}
                   </pre>
                 </div>
               </div>
@@ -2440,13 +1506,14 @@ export default function App() {
                 <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-[#0B41AD]" />
                 <div>
                   <h2 className="text-base font-bold text-[#0B1F44]">
-                    Native Android APK Ready (.github/workflows/build.yml)
+                    Native Android App Ready (/app)
                   </h2>
                   <p className="mt-1 text-sm leading-relaxed text-slate-600">
                     Complete native Java & XML Android source files (`MainActivity`,
-                    `CollectDataFragment`, `SettingsFragment`, `GeneratedFilesFragment`,
-                    `StorageManager`, `PosterRenderer`, `BulkPosterManager`, and
-                    `ZipExportManager`) and unit tests are included in `/app`.
+                    `CollectDataFragment`, `CategoryFormPageFragment`, `RichTextSpannableCodec`,
+                    `SettingsFragment`, `GeneratedFilesFragment`, `StorageManager`,
+                    `DynamicPosterLayoutEngine`, `HousePosterTemplate`, `LandPosterTemplate`, and
+                    unit tests) are updated in `/app`.
                   </p>
                 </div>
               </div>
@@ -2455,17 +1522,17 @@ export default function App() {
         </div>
       </div>
 
-      {/* Full-resolution 4:3 Poster Modal */}
+      {/* Full-resolution 3:4 Portrait Poster Modal */}
       {previewPoster && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-2xl rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold text-[#0B1F44]">
                   {previewPoster.recordId} • {previewPoster.fileName}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  1440×1080 (4:3 Landscape) • Offline Canvas Render
+                  1440×1920 (3:4 Portrait) • Offline Canvas Render
                 </p>
               </div>
               <button
@@ -2480,7 +1547,7 @@ export default function App() {
             <img
               src={previewPoster.dataUrl}
               alt={previewPoster.fileName}
-              className="mt-4 aspect-[4/3] w-full rounded-xl border border-slate-200 bg-slate-950 object-contain"
+              className="mt-4 aspect-[3/4] max-h-[65vh] w-full rounded-xl border border-slate-200 bg-slate-950 object-contain"
             />
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -2498,6 +1565,37 @@ export default function App() {
                 <Download className="h-3.5 w-3.5" />
                 <span>Download JPG</span>
               </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl">
+            <h3 className="text-base font-bold text-[#0B1F44]">Delete Poster & Record?</h3>
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">
+              This will permanently delete{' '}
+              {deleteTarget.fileName ? `${deleteTarget.fileName} and ` : ''}the linked record{' '}
+              <span className="font-mono font-bold">{deleteTarget.recordId}</span> from{' '}
+              <span className="font-mono">{deleteTarget.sourceTxtFile}</span>.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className="h-9 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="h-9 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-700"
+              >
+                Delete
+              </button>
             </div>
           </div>
         </div>

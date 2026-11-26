@@ -4,6 +4,8 @@ public enum PropertyCategory {
     HOUSE_FOR_RENT(
             "House for Rent",
             "HOUSE_FOR_RENT",
+            "PH_RENT_",
+            "PH_RENT_",
             "HOUSE_",
             "House_",
             "House_Rent"
@@ -11,6 +13,8 @@ public enum PropertyCategory {
     LAND_FOR_SALE(
             "Land for Sale",
             "LAND_FOR_SALE",
+            "PH_LAND_",
+            "PH_LAND_",
             "LAND_",
             "Land_",
             "Land_Sale"
@@ -20,6 +24,8 @@ public enum PropertyCategory {
     private final String recordCategoryCode;
     private final String idPrefix;
     private final String posterPrefix;
+    private final String legacyIdPrefix;
+    private final String legacyPosterPrefix;
     private final String zipSlug;
 
     PropertyCategory(
@@ -27,12 +33,16 @@ public enum PropertyCategory {
             String recordCategoryCode,
             String idPrefix,
             String posterPrefix,
+            String legacyIdPrefix,
+            String legacyPosterPrefix,
             String zipSlug
     ) {
         this.folderName = folderName;
         this.recordCategoryCode = recordCategoryCode;
         this.idPrefix = idPrefix;
         this.posterPrefix = posterPrefix;
+        this.legacyIdPrefix = legacyIdPrefix;
+        this.legacyPosterPrefix = legacyPosterPrefix;
         this.zipSlug = zipSlug;
     }
 
@@ -54,6 +64,14 @@ public enum PropertyCategory {
 
     public String getPosterPrefix() {
         return posterPrefix;
+    }
+
+    public String getLegacyIdPrefix() {
+        return legacyIdPrefix;
+    }
+
+    public String getLegacyPosterPrefix() {
+        return legacyPosterPrefix;
     }
 
     public String getZipSlug() {

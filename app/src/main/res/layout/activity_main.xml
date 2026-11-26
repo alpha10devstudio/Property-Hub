@@ -39,7 +39,7 @@
                 android:gravity="center"
                 android:orientation="vertical"
                 app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toStartOf="@id/btnHeaderSettings"
+                app:layout_constraintEnd_toStartOf="@id/btnHeaderFiles"
                 app:layout_constraintStart_toEndOf="@id/ivBrandLogo"
                 app:layout_constraintTop_toTopOf="parent">
 
@@ -49,7 +49,7 @@
                     android:fontFamily="sans-serif-medium"
                     android:text="@string/app_name"
                     android:textColor="@color/white"
-                    android:textSize="23sp"
+                    android:textSize="22sp"
                     android:textStyle="bold" />
 
                 <TextView
@@ -58,16 +58,31 @@
                     android:layout_marginTop="2dp"
                     android:text="@string/app_subtitle"
                     android:textColor="@color/header_subtitle"
-                    android:textSize="12.5sp" />
+                    android:textSize="12sp" />
             </LinearLayout>
 
             <ImageButton
+                android:id="@+id/btnHeaderFiles"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
+                android:layout_marginEnd="2dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/nav_generated_files"
+                android:padding="9dp"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_nav_folder"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toStartOf="@id/btnHeaderSettings"
+                app:layout_constraintTop_toTopOf="parent"
+                app:tint="@color/white" />
+
+            <ImageButton
                 android:id="@+id/btnHeaderSettings"
-                android:layout_width="44dp"
-                android:layout_height="44dp"
+                android:layout_width="42dp"
+                android:layout_height="42dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/settings_desc"
-                android:padding="10dp"
+                android:padding="9dp"
                 android:scaleType="fitCenter"
                 android:src="@drawable/ic_settings_gear"
                 app:layout_constraintBottom_toBottomOf="parent"
@@ -118,24 +133,6 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:background="?attr/phNavBorder" />
-
-        <!-- Persistent 3-Destination Bottom Navigation Bar -->
-        <com.google.android.material.bottomnavigation.BottomNavigationView
-            android:id="@+id/bottomNavigation"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:background="?attr/phNavBg"
-            app:elevation="6dp"
-            app:itemActiveIndicatorStyle="@null"
-            app:itemIconTint="@color/bottom_nav_item_color"
-            app:itemTextColor="@color/bottom_nav_item_color"
-            app:labelVisibilityMode="labeled"
-            app:menu="@menu/bottom_nav_menu" />
 
     </LinearLayout>
 

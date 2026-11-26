@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginBottom="12dp"
+    android:orientation="horizontal">
+
+    <FrameLayout
+        android:id="@+id/fieldIconBadge"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:layout_marginTop="2dp"
+        android:background="@drawable/bg_circle_blue">
+
+        <ImageView
+            android:id="@+id/ivFieldIcon"
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_gravity="center"
+            android:contentDescription="@null"
+            android:src="@drawable/ic_document" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="11dp"
+        android:layout_weight="1"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="5dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/tvFieldLabel"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="?attr/phTextPrimary"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/layoutFormatControls"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:visibility="gone">
+
+                <TextView
+                    android:id="@+id/btnFormatBold"
+                    android:layout_width="30dp"
+                    android:layout_height="26dp"
+                    android:clickable="true"
+                    android:contentDescription="Bold"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:gravity="center"
+                    android:text="B"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/btnFormatItalic"
+                    android:layout_width="30dp"
+                    android:layout_height="26dp"
+                    android:layout_marginStart="6dp"
+                    android:clickable="true"
+                    android:contentDescription="Italic"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false"
+                    android:fontFamily="serif"
+                    android:gravity="center"
+                    android:text="I"
+                    android:textSize="13sp"
+                    android:textStyle="italic" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etFieldInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@drawable/bg_input_field_blue"
+            android:importantForAutofill="no"
+            android:minHeight="44dp"
+            android:paddingStart="13dp"
+            android:paddingTop="10dp"
+            android:paddingEnd="13dp"
+            android:paddingBottom="10dp"
+            android:textColor="?attr/phTextPrimary"
+            android:textColorHint="?attr/phTextSecondary"
+            android:textSize="14.5sp" />
+    </LinearLayout>
+</LinearLayout>

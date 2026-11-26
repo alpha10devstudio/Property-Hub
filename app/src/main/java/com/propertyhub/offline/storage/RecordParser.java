@@ -4,9 +4,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.propertyhub.offline.model.PropertyCategory;
+import com.propertyhub.offline.model.PropertyFieldValue;
 import com.propertyhub.offline.model.PropertyRecord;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -141,7 +143,9 @@ public final class RecordParser {
         String date = extractDateFromFileName(sourceFileName);
         String time = "";
         PropertyCategory explicitCategory = null;
+        String title = null;
         String mobile = "";
+        List<PropertyFieldValue> fieldValues = Collections.emptyList();
         StringBuilder detailsBuilder = new StringBuilder();
         boolean inDetails = false;
 
@@ -192,10 +196,15 @@ public final class RecordParser {
                 if (parsedCat != null) {
                     explicitCategory = parsedCat;
                 }
+            } else if (trimmedLine.startsWith("TITLE:")) {
+                title = trimmedLine.substring("TITLE:".length()).trim();
             } else if (trimmedLine.startsWith("MOBILE:")) {
                 mobile = trimmedLine.substring("MOBILE:".length()).trim();
             } else if (trimmedLine.startsWith("Mobile:")) {
                 mobile = trimmedLine.substring("Mobile:".length()).trim();
+            } else if (trimmedLine.startsWith("FIELDS_JSON:")) {
+                String json = trimmedLine.substring("FIELDS_JSON:".length()).trim();
+                fieldValues = PropertyFieldValue.fromJsonArrayString(json);
             } else if ("DETAILS:".equals(trimmedLine) || "Details:".equals(trimmedLine)) {
                 inDetails = true;
             } else if (trimmedLine.startsWith("DETAILS:")) {
@@ -228,7 +237,11 @@ public final class RecordParser {
             return null;
         }
 
-        if (mobile.isEmpty() || details.trim().isEmpty()) {
+        if (details.trim().isEmpty() && !fieldValues.isEmpty()) {
+            details = PropertyRecord.buildHumanReadableSummary(category, fieldValues);
+        }
+
+        if (mobile.isEmpty() || (details.trim().isEmpty() && fieldValues.isEmpty())) {
             warnings.add(sourceFileName + " (entry #" + blockIndex + "): Missing required mobile or details.");
             return null;
         }
@@ -241,7 +254,7 @@ public final class RecordParser {
             String numPart = legacyNumber != null
                     ? legacyNumber
                     : String.format(Locale.US, "%03d", blockIndex);
-            recordId = category.getIdPrefix() + "LEGACY_" + compactDate + "_" + numPart;
+            recordId = category.getLegacyIdPrefix() + "LEGACY_" + compactDate + "_" + numPart;
         }
 
         return new PropertyRecord(
@@ -249,8 +262,10 @@ public final class RecordParser {
                 date,
                 time,
                 category,
+                title,
                 mobile,
                 details,
+                fieldValues,
                 sourceFileName
         );
     }
@@ -258,10 +273,10 @@ public final class RecordParser {
     @Nullable
     public static PropertyCategory inferCategoryFromRecordId(@NonNull String recordId) {
         String upper = recordId.trim().toUpperCase(Locale.US);
-        if (upper.startsWith("HOUSE_")) {
+        if (upper.startsWith("PH_RENT_") || upper.startsWith("HOUSE_")) {
             return PropertyCategory.HOUSE_FOR_RENT;
         }
-        if (upper.startsWith("LAND_")) {
+        if (upper.startsWith("PH_LAND_") || upper.startsWith("LAND_")) {
             return PropertyCategory.LAND_FOR_SALE;
         }
         return null;
