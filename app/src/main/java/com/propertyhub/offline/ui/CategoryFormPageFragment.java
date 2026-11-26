@@ -288,7 +288,7 @@ public class CategoryFormPageFragment extends Fragment {
 
             PropertyFieldValue restored = restoredMap.get(cfg.getFieldId());
             if (restored != null) {
-                if (cfg.isFormattable()) {
+                if (cfg.supportsFormatting()) {
                     editText.setText(RichTextSpannableCodec.toSpannable(restored.getSegments()));
                 } else {
                     editText.setText(restored.getPlainText());
@@ -298,7 +298,7 @@ public class CategoryFormPageFragment extends Fragment {
             }
 
             RichTextSpannableCodec.Controller controller = null;
-            if (cfg.isFormattable()) {
+            if (cfg.supportsFormatting()) {
                 formatControls.setVisibility(View.VISIBLE);
                 applyFormatToggleVisual(btnBold, false, activeAccent);
                 applyFormatToggleVisual(btnItalic, false, activeAccent);
@@ -432,7 +432,7 @@ public class CategoryFormPageFragment extends Fragment {
         for (FieldBinding binding : fieldBindings) {
             PropertyFieldConfig cfg = binding.config;
             String rawText = textOf(binding.editText);
-            if (cfg.isFormattable()) {
+            if (cfg.supportsFormatting()) {
                 List<StyledSegment> segs = RichTextSpannableCodec.fromSpanned(binding.editText.getText());
                 out.add(new PropertyFieldValue(cfg.getFieldId(), cfg.getLabel(), rawText, segs));
             } else {
