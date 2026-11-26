@@ -14,13 +14,7 @@ import androidx.annotation.Nullable;
 
 import com.propertyhub.offline.model.PropertyRecord;
 
-import java.util.List;
-
 public final class HousePosterTemplate {
-
-    private static final int NAVY_BLUE = Color.parseColor("#032668");
-    private static final String TITLE_TEXT = "ফ্ল্যাট / বাসা ভাড়া হবে";
-    private static final String CONTACT_PREFIX = "যোগাযোগ: ";
 
     private HousePosterTemplate() {
     }
@@ -32,135 +26,149 @@ public final class HousePosterTemplate {
             int width,
             int height
     ) {
-        // 1. Pure White Background & Navy Blue Rounded Outer Border
-        canvas.drawColor(Color.WHITE);
-
-        Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        borderPaint.setColor(NAVY_BLUE);
-        borderPaint.setStyle(Paint.Style.STROKE);
-        borderPaint.setStrokeWidth(7f);
-        RectF outerRect = new RectF(16f, 16f, width - 16f, height - 16f);
-        canvas.drawRoundRect(outerRect, 48f, 48f, borderPaint);
-
-        // 2. Top Roof Silhouette + Symmetric Tapered Wings
-        drawTopRoofEmblem(canvas, width);
+        PosterThemeConfig theme = PosterThemeConfig.houseForRent();
+        int navyBlue = theme.getPrimaryColor();
 
         Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
         Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
 
+        DynamicPosterLayoutEngine.LayoutPlan layout = DynamicPosterLayoutEngine.solveLayout(
+                theme,
+                record.getDetails(),
+                paragraphTypeface,
+                width,
+                height
+        );
+
+        // 1. Pure White Background & Navy Blue Rounded Outer Border
+        canvas.drawColor(theme.getCanvasBackgroundColor());
+
+        Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        borderPaint.setColor(navyBlue);
+        borderPaint.setStyle(Paint.Style.STROKE);
+        borderPaint.setStrokeWidth(7f);
+        canvas.drawRoundRect(
+                layout.getOuterRect(),
+                theme.getOuterBorderRadius(),
+                theme.getOuterBorderRadius(),
+                borderPaint
+        );
+
+        // 2. Top Roof Silhouette + Symmetric Tapered Wings anchored to dynamic header
+        drawTopRoofEmblem(canvas, width, layout.getHeaderRect(), navyBlue);
+
         Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         fillPaint.setStyle(Paint.Style.FILL);
-        fillPaint.setColor(NAVY_BLUE);
+        fillPaint.setColor(navyBlue);
 
-        // 3. Navy Blue Rounded Title Banner ("ফ্ল্যাট / বাসা ভাড়া হবে")
-        RectF titleRect = new RectF(36f, 162f, width - 36f, 376f);
-        canvas.drawRoundRect(titleRect, 52f, 52f, fillPaint);
+        // 3. Navy Blue Rounded Title Banner (FIXED Title font size — no auto-scaling)
+        RectF titleRect = layout.getTitleRect();
+        canvas.drawRoundRect(
+                titleRect,
+                theme.getTitleCornerRadius(),
+                theme.getTitleCornerRadius(),
+                fillPaint
+        );
 
         TextPaint titlePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         titlePaint.setColor(Color.WHITE);
         titlePaint.setTypeface(titleTypeface);
         titlePaint.setTextAlign(Paint.Align.CENTER);
-        PosterTextFitter.fitSingleLineTextSize(
-                TITLE_TEXT,
-                titlePaint,
-                titleRect.width() - 88f,
-                124f,
-                44f
-        );
+        titlePaint.setTextSize(theme.getFixedTitleFontSizePx());
         Paint.FontMetrics titleFm = titlePaint.getFontMetrics();
         float titleBaseline = titleRect.centerY() - (titleFm.ascent + titleFm.descent) / 2f;
-        canvas.drawText(TITLE_TEXT, titleRect.centerX(), titleBaseline, titlePaint);
+        canvas.drawText(theme.getTitleText(), titleRect.centerX(), titleBaseline, titlePaint);
 
-        // 4. Middle White Details Card with Navy Blue Border
-        RectF detailsCard = new RectF(40f, 408f, width - 40f, 810f);
+        // 4. Dynamic Middle White Details Card with Navy Blue Border
+        RectF detailsCard = layout.getDetailsCardRect();
         fillPaint.setColor(Color.WHITE);
-        canvas.drawRoundRect(detailsCard, 46f, 46f, fillPaint);
+        canvas.drawRoundRect(
+                detailsCard,
+                theme.getDetailsCornerRadius(),
+                theme.getDetailsCornerRadius(),
+                fillPaint
+        );
 
         borderPaint.setStrokeWidth(6f);
-        canvas.drawRoundRect(detailsCard, 46f, 46f, borderPaint);
+        canvas.drawRoundRect(
+                detailsCard,
+                theme.getDetailsCornerRadius(),
+                theme.getDetailsCornerRadius(),
+                borderPaint
+        );
 
-        // Left Two-Story House + Tree Architectural Illustration
-        drawDetailsCardHouseIllustration(canvas, detailsCard);
+        // Left Two-Story House + Tree Architectural Illustration (proportionally scaled to card)
+        drawDetailsCardHouseIllustration(canvas, detailsCard, layout.getDividerX(), navyBlue);
 
         // Vertical Divider Line
         Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dividerPaint.setColor(NAVY_BLUE);
+        dividerPaint.setColor(navyBlue);
         dividerPaint.setStrokeWidth(5f);
         dividerPaint.setStrokeCap(Paint.Cap.ROUND);
-        float dividerX = 374f;
-        canvas.drawLine(dividerX, detailsCard.top + 38f, dividerX, detailsCard.bottom - 38f, dividerPaint);
-
-        // Right Dynamic Details Paragraphs (paragraph.ttf, auto-scaled, no quotes/separator commas)
-        TextPaint detailsPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        detailsPaint.setColor(NAVY_BLUE);
-        detailsPaint.setTypeface(paragraphTypeface);
-
-        int boxLeft = 408;
-        int boxTop = (int) (detailsCard.top + 26f);
-        int boxWidth = (int) (detailsCard.right - 32f - boxLeft);
-        int boxHeight = (int) (detailsCard.bottom - 26f - boxTop);
-
-        List<String> paragraphs = DetailsParagraphParser.parse(record.getDetails());
-        PosterTextFitter.FitResult fit = PosterTextFitter.fitParagraphs(
-                paragraphs,
-                detailsPaint,
-                boxWidth,
-                boxHeight,
-                64f,
-                18f
+        float dividerX = layout.getDividerX();
+        float dividerInset = Math.min(38f, detailsCard.height() * 0.12f);
+        canvas.drawLine(
+                dividerX,
+                detailsCard.top + dividerInset,
+                dividerX,
+                detailsCard.bottom - dividerInset,
+                dividerPaint
         );
+
+        // Right Dynamic Details Paragraphs (paragraph.ttf + Bold/Italic Markdown)
+        RectF textRect = layout.getDetailsTextRect();
         PosterTextFitter.drawFitResult(
                 canvas,
-                fit,
-                boxLeft,
-                boxTop,
-                boxWidth,
-                boxHeight,
-                !fit.isOverflowed()
+                layout.getDetailsFit(),
+                textRect.left,
+                textRect.top,
+                Math.round(textRect.width()),
+                Math.round(textRect.height()),
+                !layout.isOverflowed()
         );
 
-        // 5. Bottom Navy Blue Contact Banner + White Phone Circle + Mobile Number
-        RectF contactRect = new RectF(36f, 842f, width - 36f, 1042f);
-        fillPaint.setColor(NAVY_BLUE);
-        canvas.drawRoundRect(contactRect, 52f, 52f, fillPaint);
+        // 5. Bottom Navy Blue Contact Banner + White Phone Circle + Fixed Mobile Number
+        RectF contactRect = layout.getContactRect();
+        fillPaint.setColor(navyBlue);
+        canvas.drawRoundRect(
+                contactRect,
+                theme.getContactCornerRadius(),
+                theme.getContactCornerRadius(),
+                fillPaint
+        );
 
-        float phoneCircleRadius = 64f;
-        float phoneCircleCx = 144f;
+        float phoneCircleRadius = Math.min(62f, contactRect.height() * 0.32f);
+        float phoneCircleCx = contactRect.left + 108f;
         float phoneCircleCy = contactRect.centerY();
         fillPaint.setColor(Color.WHITE);
         canvas.drawCircle(phoneCircleCx, phoneCircleCy, phoneCircleRadius, fillPaint);
 
-        drawNavyHandsetIcon(canvas, phoneCircleCx, phoneCircleCy, phoneCircleRadius);
+        drawNavyHandsetIcon(canvas, phoneCircleCx, phoneCircleCy, phoneCircleRadius, navyBlue);
 
         // Vertical White Divider inside Contact Banner
         dividerPaint.setColor(Color.WHITE);
         dividerPaint.setStrokeWidth(5f);
-        float contactDividerX = 242f;
+        float contactDividerX = contactRect.left + 206f;
+        float contactDividerInset = Math.min(30f, contactRect.height() * 0.16f);
         canvas.drawLine(
                 contactDividerX,
-                contactRect.top + 30f,
+                contactRect.top + contactDividerInset,
                 contactDividerX,
-                contactRect.bottom - 30f,
+                contactRect.bottom - contactDividerInset,
                 dividerPaint
         );
 
-        // Contact Text & Exact Mobile Number (paragraph.ttf, auto-scaled, digits preserved verbatim)
-        String contactLine = CONTACT_PREFIX + record.getMobile();
-        float mobileAreaLeft = 272f;
-        float mobileAreaRight = contactRect.right - 40f;
+        // Fixed Contact Font Size ("যোগাযোগ: " + exact mobile number, no auto-resizing)
+        String contactLine = theme.getContactPrefix() + record.getMobile();
+        float mobileAreaLeft = contactDividerX + 30f;
+        float mobileAreaRight = contactRect.right - 36f;
         float mobileAreaWidth = mobileAreaRight - mobileAreaLeft;
 
         TextPaint mobilePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mobilePaint.setColor(Color.WHITE);
         mobilePaint.setTypeface(paragraphTypeface);
         mobilePaint.setTextAlign(Paint.Align.CENTER);
-        PosterTextFitter.fitSingleLineTextSize(
-                contactLine,
-                mobilePaint,
-                mobileAreaWidth,
-                92f,
-                22f
-        );
+        mobilePaint.setTextSize(theme.getFixedContactFontSizePx());
         Paint.FontMetrics mobileFm = mobilePaint.getFontMetrics();
         float mobileBaseline = contactRect.centerY() - (mobileFm.ascent + mobileFm.descent) / 2f;
         canvas.drawText(
@@ -170,15 +178,24 @@ public final class HousePosterTemplate {
                 mobilePaint
         );
 
-        return fit.isOverflowed();
+        return layout.isOverflowed();
     }
 
-    private static void drawTopRoofEmblem(@NonNull Canvas canvas, int width) {
+    private static void drawTopRoofEmblem(
+            @NonNull Canvas canvas,
+            int width,
+            @NonNull RectF headerRect,
+            int navyBlue
+    ) {
         Paint navyPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        navyPaint.setColor(NAVY_BLUE);
+        navyPaint.setColor(navyBlue);
         navyPaint.setStyle(Paint.Style.FILL);
 
         float cx = width / 2f;
+        float dy = headerRect.top - 32f;
+
+        canvas.save();
+        canvas.translate(0f, dy);
 
         // Left horizontal tapered wing
         Path leftWing = new Path();
@@ -198,7 +215,7 @@ public final class HousePosterTemplate {
         rightWing.close();
         canvas.drawPath(rightWing, navyPaint);
 
-        // Left angled roof accent beam (signature detail from reference silhouette)
+        // Left angled roof accent beam
         Path leftBeam = new Path();
         leftBeam.moveTo(438f, 150f);
         leftBeam.lineTo(618f, 48f);
@@ -231,15 +248,22 @@ public final class HousePosterTemplate {
         canvas.drawRoundRect(new RectF(startX + winSize + gap, startY, startX + 2f * winSize + gap, startY + winSize), 2f, 2f, navyPaint);
         canvas.drawRoundRect(new RectF(startX, startY + winSize + gap, startX + winSize, startY + 2f * winSize + gap), 2f, 2f, navyPaint);
         canvas.drawRoundRect(new RectF(startX + winSize + gap, startY + winSize + gap, startX + 2f * winSize + gap, startY + 2f * winSize + gap), 2f, 2f, navyPaint);
+
+        canvas.restore();
     }
 
-    private static void drawDetailsCardHouseIllustration(@NonNull Canvas canvas, @NonNull RectF card) {
+    private static void drawDetailsCardHouseIllustration(
+            @NonNull Canvas canvas,
+            @NonNull RectF card,
+            float dividerX,
+            int navyBlue
+    ) {
         Paint navy = new Paint(Paint.ANTI_ALIAS_FLAG);
-        navy.setColor(NAVY_BLUE);
+        navy.setColor(navyBlue);
         navy.setStyle(Paint.Style.FILL);
 
         Paint navyStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        navyStroke.setColor(NAVY_BLUE);
+        navyStroke.setColor(navyBlue);
         navyStroke.setStyle(Paint.Style.STROKE);
         navyStroke.setStrokeCap(Paint.Cap.ROUND);
         navyStroke.setStrokeJoin(Paint.Join.ROUND);
@@ -248,7 +272,20 @@ public final class HousePosterTemplate {
         white.setColor(Color.WHITE);
         white.setStyle(Paint.Style.FILL);
 
-        float baseBottom = card.bottom - 38f; // ~772
+        float paneWidth = dividerX - card.left;
+        float scale = Math.min(
+                1.08f,
+                Math.min((paneWidth - 36f) / 294f, (card.height() - 44f) / 322f)
+        );
+
+        canvas.save();
+        canvas.translate(card.left + paneWidth / 2f, card.centerY());
+        canvas.scale(scale, scale);
+        // Normalize original [x: 64..356 (mid 210), y: 454..772 (mid 613)] around origin
+        canvas.translate(-210f, -613f);
+
+        float cardTopRef = 408f;
+        float baseBottom = 772f;
 
         // Curved ground arc under tree and house
         Path ground = new Path();
@@ -265,7 +302,7 @@ public final class HousePosterTemplate {
         canvas.drawCircle(treeCx, trunkBottom - 86f, 30f, navy);
         canvas.drawCircle(treeCx - 16f, trunkBottom - 68f, 20f, navy);
         canvas.drawCircle(treeCx + 16f, trunkBottom - 68f, 20f, navy);
-        // Subtle white fork highlight on trunk
+
         Paint whiteLine = new Paint(Paint.ANTI_ALIAS_FLAG);
         whiteLine.setColor(Color.WHITE);
         whiteLine.setStrokeWidth(3f);
@@ -277,10 +314,10 @@ public final class HousePosterTemplate {
         float houseLeft = 140f;
         float houseRight = 334f;
         float midWingX = 212f;
-        float wingTop = card.top + 114f;   // 522
+        float wingTop = cardTopRef + 114f;   // 522
         float gablePeakX = 274f;
-        float gablePeakY = card.top + 46f; // 454
-        float eaveY = card.top + 106f;     // 514
+        float gablePeakY = cardTopRef + 46f; // 454
+        float eaveY = cardTopRef + 106f;     // 514
         float houseBottom = baseBottom - 10f;
 
         // Upper-left wing flat cornice + vertical wall outline
@@ -338,14 +375,21 @@ public final class HousePosterTemplate {
         canvas.drawRect(doorRect, navy);
         canvas.drawCircle(doorRect.centerX() - 9f, doorRect.centerY() + 2f, 3.2f, white);
         canvas.drawCircle(doorRect.centerX() + 9f, doorRect.centerY() + 2f, 3.2f, white);
+
+        canvas.restore();
     }
 
-    private static void drawNavyHandsetIcon(@NonNull Canvas canvas, float cx, float cy, float circleRadius) {
+    private static void drawNavyHandsetIcon(
+            @NonNull Canvas canvas,
+            float cx,
+            float cy,
+            float circleRadius,
+            int navyBlue
+    ) {
         Paint phonePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        phonePaint.setColor(NAVY_BLUE);
+        phonePaint.setColor(navyBlue);
         phonePaint.setStyle(Paint.Style.FILL);
 
-        // Classic tilted telephone receiver silhouette centered inside the white circle
         float s = circleRadius / 64f;
         canvas.save();
         canvas.translate(cx, cy);

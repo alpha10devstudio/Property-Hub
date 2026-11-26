@@ -238,31 +238,320 @@ function parseDetailsParagraphs(rawDetails: string): string[] {
   return paragraphs.length > 0 ? paragraphs : ['-'];
 }
 
-function wrapParagraphsWithGap(
-  ctx: CanvasRenderingContext2D,
-  paragraphs: string[],
-  maxWidth: number
-): string[][] {
-  return paragraphs.map((para) => {
-    const subLines = para.split('\n');
-    const wrapped: string[] = [];
-    for (const sub of subLines) {
-      const words = sub.trim().split(/\s+/).filter(Boolean);
-      if (words.length === 0) continue;
-      let current = '';
-      for (const word of words) {
-        const candidate = current ? `${current} ${word}` : word;
-        if (ctx.measureText(candidate).width <= maxWidth) {
-          current = candidate;
-        } else {
-          if (current) wrapped.push(current);
-          current = word;
+interface StyledSegment {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+}
+
+interface StyledToken {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+}
+
+function parseInlineMarkdown(paragraph: string): StyledSegment[] {
+  if (!paragraph) return [{ text: '', bold: false, italic: false }];
+  const raw: StyledSegment[] = [];
+
+  const isAlphaNum = (ch: string) => /[\p{L}\p{N}]/u.test(ch);
+  const isWs = (ch: string) => /\s/.test(ch);
+
+  const findClosingTriple = (src: string, from: number, end: number, marker: string) => {
+    for (let j = from; j <= end - 3; j++) {
+      if (src[j] === '\\') {
+        j++;
+        continue;
+      }
+      if (src[j] === marker && src[j + 1] === marker && src[j + 2] === marker && !isWs(src[j - 1])) {
+        return j;
+      }
+    }
+    return -1;
+  };
+
+  const findClosingDouble = (src: string, from: number, end: number, marker: string) => {
+    for (let j = from; j <= end - 2; j++) {
+      if (src[j] === '\\') {
+        j++;
+        continue;
+      }
+      if (src[j] === marker && src[j + 1] === marker && !isWs(src[j - 1])) {
+        return j;
+      }
+    }
+    return -1;
+  };
+
+  const findClosingSingle = (src: string, from: number, end: number, marker: string) => {
+    for (let j = from; j < end; j++) {
+      if (src[j] === '\\') {
+        j++;
+        continue;
+      }
+      if (j + 1 < end && src[j] === marker && src[j + 1] === marker) {
+        j++;
+        continue;
+      }
+      if (src[j] === marker && !isWs(src[j - 1])) {
+        if (marker === '*' || j + 1 >= end || !isAlphaNum(src[j + 1])) {
+          return j;
         }
       }
-      if (current) wrapped.push(current);
     }
-    return wrapped.length > 0 ? wrapped : ['-'];
+    return -1;
+  };
+
+  const walk = (src: string, start: number, end: number, bold: boolean, italic: boolean) => {
+    let plain = '';
+    const flush = () => {
+      if (plain) {
+        raw.push({ text: plain, bold, italic });
+        plain = '';
+      }
+    };
+
+    let i = start;
+    while (i < end) {
+      const ch = src[i];
+      if (ch === '\\' && i + 1 < end && (src[i + 1] === '*' || src[i + 1] === '_' || src[i + 1] === '\\')) {
+        plain += src[i + 1];
+        i += 2;
+        continue;
+      }
+      if (ch === '*' || ch === '_') {
+        if (i + 2 < end && src[i + 1] === ch && src[i + 2] === ch && i + 3 < end && !isWs(src[i + 3])) {
+          const closeIdx = findClosingTriple(src, i + 3, end, ch);
+          if (closeIdx > i + 3) {
+            flush();
+            walk(src, i + 3, closeIdx, true, true);
+            i = closeIdx + 3;
+            continue;
+          }
+        }
+        if (i + 1 < end && src[i + 1] === ch && i + 2 < end && !isWs(src[i + 2])) {
+          const closeIdx = findClosingDouble(src, i + 2, end, ch);
+          if (closeIdx > i + 2) {
+            flush();
+            walk(src, i + 2, closeIdx, true, italic);
+            i = closeIdx + 2;
+            continue;
+          }
+        }
+        if (i + 1 < end && !isWs(src[i + 1])) {
+          const leftOk = ch === '*' || i <= start || !isAlphaNum(src[i - 1]);
+          if (leftOk) {
+            const closeIdx = findClosingSingle(src, i + 1, end, ch);
+            if (closeIdx > i + 1) {
+              flush();
+              walk(src, i + 1, closeIdx, bold, true);
+              i = closeIdx + 1;
+              continue;
+            }
+          }
+        }
+      }
+      plain += ch;
+      i++;
+    }
+    flush();
+  };
+
+  walk(paragraph, 0, paragraph.length, false, false);
+  const merged: StyledSegment[] = [];
+  for (const seg of raw) {
+    if (!seg.text) continue;
+    const last = merged[merged.length - 1];
+    if (last && last.bold === seg.bold && last.italic === seg.italic) {
+      last.text += seg.text;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+  return merged.length > 0 ? merged : [{ text: paragraph, bold: false, italic: false }];
+}
+
+function buildCanvasFont(fontSize: number, bold: boolean, italic: boolean): string {
+  const stylePart = `${italic ? 'italic ' : ''}${bold ? 'bold ' : '500 '}`;
+  return `${stylePart}${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+}
+
+function wrapStyledParagraphs(
+  ctx: CanvasRenderingContext2D,
+  styledParagraphs: StyledSegment[][],
+  maxWidth: number,
+  fontSize: number
+): StyledToken[][][] {
+  return styledParagraphs.map((segments) => {
+    // Split into explicit sub-lines by '\n'
+    const subLines: StyledSegment[][] = [[]];
+    for (const seg of segments) {
+      const parts = seg.text.split('\n');
+      parts.forEach((part, idx) => {
+        if (part) {
+          subLines[subLines.length - 1].push({
+            text: part,
+            bold: seg.bold,
+            italic: seg.italic,
+          });
+        }
+        if (idx < parts.length - 1) {
+          subLines.push([]);
+        }
+      });
+    }
+
+    const wrappedLines: StyledToken[][] = [];
+    for (const subSegs of subLines) {
+      // Tokenize keeping trailing/leading spaces attached cleanly for word-level wrapping
+      const tokens: StyledToken[] = [];
+      for (const seg of subSegs) {
+        const chunks = seg.text.split(/(\s+)/);
+        for (const chunk of chunks) {
+          if (!chunk) continue;
+          tokens.push({ text: chunk, bold: seg.bold, italic: seg.italic });
+        }
+      }
+
+      let currentLine: StyledToken[] = [];
+      let currentWidth = 0;
+
+      for (const tok of tokens) {
+        const isSpaceOnly = /^\s+$/.test(tok.text);
+        if (currentLine.length === 0 && isSpaceOnly) continue;
+
+        ctx.font = buildCanvasFont(fontSize, tok.bold, tok.italic);
+        const tokW = ctx.measureText(tok.text).width;
+
+        if (currentWidth + tokW <= maxWidth || currentLine.length === 0) {
+          currentLine.push(tok);
+          currentWidth += tokW;
+        } else {
+          // Trim trailing whitespace on wrapped line
+          while (currentLine.length > 0 && /^\s+$/.test(currentLine[currentLine.length - 1].text)) {
+            currentLine.pop();
+          }
+          if (currentLine.length > 0) wrappedLines.push(currentLine);
+          if (isSpaceOnly) {
+            currentLine = [];
+            currentWidth = 0;
+          } else {
+            currentLine = [tok];
+            currentWidth = tokW;
+          }
+        }
+      }
+      while (currentLine.length > 0 && /^\s+$/.test(currentLine[currentLine.length - 1].text)) {
+        currentLine.pop();
+      }
+      if (currentLine.length > 0) wrappedLines.push(currentLine);
+    }
+
+    return wrappedLines.length > 0 ? wrappedLines : [[{ text: '-', bold: false, italic: false }]];
   });
+}
+
+function computeDynamicGeometry(width: number, height: number, desiredDetailsH: number) {
+  const OUTER_MARGIN = 16;
+  const CARD_SIDE = 36;
+  const CARD_GAP = 26;
+  const HEADER_H = 118;
+  const STACK_TOP = 158;
+  const STACK_BOTTOM = height - 34;
+  const STACK_BUDGET = STACK_BOTTOM - STACK_TOP;
+  const CARDS_SUM_BUDGET = STACK_BUDGET - 2 * CARD_GAP;
+
+  const MIN_TITLE_H = 156;
+  const MAX_TITLE_H = 224;
+  const MIN_CONTACT_H = 148;
+  const MAX_CONTACT_H = 204;
+  const MIN_DETAILS_H = 256;
+  const MAX_DETAILS_H = CARDS_SUM_BUDGET - MIN_TITLE_H - MIN_CONTACT_H;
+
+  const detailsH = Math.max(MIN_DETAILS_H, Math.min(MAX_DETAILS_H, desiredDetailsH));
+  const remaining = CARDS_SUM_BUDGET - detailsH;
+  const extra = Math.max(0, remaining - MIN_TITLE_H - MIN_CONTACT_H);
+
+  const titleH = Math.min(MAX_TITLE_H, MIN_TITLE_H + extra * 0.52);
+  const contactH = Math.min(MAX_CONTACT_H, MIN_CONTACT_H + (extra - (titleH - MIN_TITLE_H)));
+
+  const totalStackH = titleH + CARD_GAP + detailsH + CARD_GAP + contactH;
+  const slack = Math.max(0, STACK_BUDGET - totalStackH);
+
+  const titleTop = STACK_TOP + slack * 0.42;
+  const titleBottom = titleTop + titleH;
+  const detailsTop = titleBottom + CARD_GAP;
+  const detailsBottom = detailsTop + detailsH;
+  const contactTop = detailsBottom + CARD_GAP;
+  const contactBottom = contactTop + contactH;
+
+  const headerBottom = Math.max(26 + HEADER_H, titleTop - 16);
+  const headerTop = headerBottom - HEADER_H;
+
+  const cardLeft = CARD_SIDE;
+  const cardRight = width - CARD_SIDE;
+  const dividerX = cardLeft + 336;
+  const textLeft = dividerX + 34;
+  const textRight = cardRight - 34;
+
+  return {
+    outerRect: { left: OUTER_MARGIN, top: OUTER_MARGIN, right: width - OUTER_MARGIN, bottom: height - OUTER_MARGIN },
+    headerRect: { left: cardLeft, top: headerTop, right: cardRight, bottom: headerBottom, height: HEADER_H },
+    titleRect: { left: cardLeft, top: titleTop, right: cardRight, bottom: titleBottom, width: cardRight - cardLeft, height: titleH },
+    detailsCard: { left: cardLeft, top: detailsTop, right: cardRight, bottom: detailsBottom, width: cardRight - cardLeft, height: detailsH },
+    contactRect: { left: cardLeft, top: contactTop, right: cardRight, bottom: contactBottom, width: cardRight - cardLeft, height: contactH },
+    dividerX,
+    textBox: { left: textLeft, top: detailsTop + 32, width: textRight - textLeft, height: detailsH - 64 },
+    maxDetailsH: MAX_DETAILS_H,
+  };
+}
+
+function drawDiamondMarker(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  r: number,
+  outerColor: string,
+  innerColor: string
+) {
+  ctx.fillStyle = outerColor;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - r);
+  ctx.lineTo(cx + r, cy);
+  ctx.lineTo(cx, cy + r);
+  ctx.lineTo(cx - r, cy);
+  ctx.closePath();
+  ctx.fill();
+
+  const ir = r * 0.45;
+  ctx.fillStyle = innerColor;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - ir);
+  ctx.lineTo(cx + ir, cy);
+  ctx.lineTo(cx, cy + ir);
+  ctx.lineTo(cx - ir, cy);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawHandsetPath(ctx: CanvasRenderingContext2D) {
+  ctx.beginPath();
+  ctx.moveTo(-22, -34);
+  ctx.quadraticCurveTo(-34, -32, -34, -18);
+  ctx.bezierCurveTo(-34, 6, -6, 34, 18, 34);
+  ctx.quadraticCurveTo(32, 34, 34, 22);
+  ctx.lineTo(34, 12);
+  ctx.quadraticCurveTo(34, 6, 26, 4);
+  ctx.lineTo(14, 2);
+  ctx.quadraticCurveTo(9, 1, 6, 5);
+  ctx.lineTo(1, 11);
+  ctx.quadraticCurveTo(-8, 6, -11, -1);
+  ctx.lineTo(-5, -6);
+  ctx.quadraticCurveTo(-1, -9, -2, -14);
+  ctx.lineTo(-4, -26);
+  ctx.quadraticCurveTo(-6, -34, -12, -34);
+  ctx.closePath();
+  ctx.fill();
 }
 
 function renderPosterDataUrl(record: PropertyRecord): string {
@@ -275,21 +564,74 @@ function renderPosterDataUrl(record: PropertyRecord): string {
   if (!ctx) return '';
 
   const isHouse = record.category === 'HOUSE_FOR_RENT';
+  const FIXED_TITLE_SIZE = 94;
+  const FIXED_CONTACT_SIZE = 82;
+  const COMPACT_CARD_MAX_H = 348;
+  const VERT_PAD = 32;
+
+  const styledParagraphs = parseDetailsParagraphs(record.details).map(parseInlineMarkdown);
+  const baseGeom = computeDynamicGeometry(width, height, COMPACT_CARD_MAX_H);
+  const textWidth = baseGeom.textBox.width;
+  const compactMaxTextH = COMPACT_CARD_MAX_H - 2 * VERT_PAD;
+  const expandedMaxTextH = baseGeom.maxDetailsH - 2 * VERT_PAD;
+
+  const measureFit = (startSize: number, minSize: number, maxH: number) => {
+    let size = startSize;
+    while (size >= minSize) {
+      const wrapped = wrapStyledParagraphs(ctx, styledParagraphs, textWidth, size);
+      const lineH = size * 1.18;
+      const paraGap = Math.max(10, size * 0.42);
+      const totalH =
+        wrapped.reduce((acc, g) => acc + g.length * lineH, 0) +
+        Math.max(0, wrapped.length - 1) * paraGap;
+      if (totalH <= maxH) {
+        return { wrapped, fontSize: size, lineH, paraGap, totalH, overflowed: false };
+      }
+      size -= 2;
+    }
+    const minWrapped = wrapStyledParagraphs(ctx, styledParagraphs, textWidth, minSize);
+    const minLineH = minSize * 1.12;
+    const minGap = Math.max(8, minSize * 0.30);
+    const minTotalH =
+      minWrapped.reduce((acc, g) => acc + g.length * minLineH, 0) +
+      Math.max(0, minWrapped.length - 1) * minGap;
+    return {
+      wrapped: minWrapped,
+      fontSize: minSize,
+      lineH: minLineH,
+      paraGap: minGap,
+      totalH: minTotalH,
+      overflowed: minTotalH > maxH,
+    };
+  };
+
+  let chosenFit = measureFit(66, 50, compactMaxTextH);
+  let desiredCardH = Math.max(256, chosenFit.totalH + 2 * VERT_PAD);
+  if (chosenFit.overflowed || chosenFit.totalH > compactMaxTextH) {
+    chosenFit = measureFit(50, 18, expandedMaxTextH);
+    desiredCardH = chosenFit.overflowed
+      ? baseGeom.maxDetailsH
+      : Math.max(COMPACT_CARD_MAX_H, Math.min(baseGeom.maxDetailsH, chosenFit.totalH + 2 * VERT_PAD));
+  }
+
+  const layout = computeDynamicGeometry(width, height, desiredCardH);
+
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, width, height);
 
   if (isHouse) {
     const NAVY = '#032668';
 
-    // Pure white base & Navy Blue outer rounded border
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, width, height);
-
+    // Outer border
     ctx.strokeStyle = NAVY;
     ctx.lineWidth = 7;
     ctx.beginPath();
     ctx.roundRect(16, 16, width - 32, height - 32, 48);
     ctx.stroke();
 
-    // Top roof silhouette + symmetric tapered wings
+    // Dynamic top roof silhouette + wings
+    ctx.save();
+    ctx.translate(0, layout.headerRect.top - 32);
     ctx.fillStyle = NAVY;
     ctx.beginPath();
     ctx.moveTo(96, 114);
@@ -332,35 +674,37 @@ function renderPosterDataUrl(record: PropertyRecord): string {
     ctx.fillRect(cx + 4, 98, 18, 18);
     ctx.fillRect(cx - 22, 124, 18, 18);
     ctx.fillRect(cx + 4, 124, 18, 18);
+    ctx.restore();
 
-    // Big Navy Title Banner
+    // Fixed Title Card
     ctx.fillStyle = NAVY;
     ctx.beginPath();
-    ctx.roundRect(36, 162, width - 72, 214, 52);
+    ctx.roundRect(layout.titleRect.left, layout.titleRect.top, layout.titleRect.width, layout.titleRect.height, 50);
     ctx.fill();
 
-    const titleText = 'ফ্ল্যাট / বাসা ভাড়া হবে';
-    let titleSize = 112;
-    ctx.font = `bold ${titleSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    while (ctx.measureText(titleText).width > width - 160 && titleSize > 44) {
-      titleSize -= 2;
-      ctx.font = `bold ${titleSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    }
+    ctx.font = `bold ${FIXED_TITLE_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(titleText, width / 2, 269);
+    ctx.fillText('ফ্ল্যাট / বাসা ভাড়া দেওয়া হবে', width / 2, (layout.titleRect.top + layout.titleRect.bottom) / 2);
 
-    // Middle White Details Card with Navy Border
+    // Dynamic Details Card
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.roundRect(40, 408, width - 80, 402, 46);
+    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 44);
     ctx.fill();
     ctx.strokeStyle = NAVY;
     ctx.lineWidth = 6;
     ctx.stroke();
 
-    // Left 2-story house + tree illustration
+    // Proportionally scaled 2-story house + tree illustration
+    const paneW = layout.dividerX - layout.detailsCard.left;
+    const hScale = Math.min(1.08, Math.min((paneW - 36) / 294, (layout.detailsCard.height - 44) / 322));
+    ctx.save();
+    ctx.translate(layout.detailsCard.left + paneW / 2, (layout.detailsCard.top + layout.detailsCard.bottom) / 2);
+    ctx.scale(hScale, hScale);
+    ctx.translate(-210, -613);
+
     ctx.fillStyle = NAVY;
     ctx.beginPath();
     ctx.moveTo(64, 772);
@@ -415,205 +759,413 @@ function renderPosterDataUrl(record: PropertyRecord): string {
     ctx.arc(276, 696, 3.2, 0, Math.PI * 2);
     ctx.arc(294, 696, 3.2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
     // Vertical divider
+    const divInset = Math.min(38, layout.detailsCard.height * 0.12);
     ctx.strokeStyle = NAVY;
     ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(374, 446);
-    ctx.lineTo(374, 772);
+    ctx.moveTo(layout.dividerX, layout.detailsCard.top + divInset);
+    ctx.lineTo(layout.dividerX, layout.detailsCard.bottom - divInset);
     ctx.stroke();
 
-    // Right Dynamic Details Paragraphs
-    const paragraphs = parseDetailsParagraphs(record.details);
-    const boxLeft = 408;
-    const boxTop = 434;
-    const boxWidth = width - 72 - boxLeft;
-    const boxHeight = 350;
-
-    let fontSize = 62;
-    let wrappedGroups: string[][] = [];
-    let lineH = fontSize * 1.18;
-    let paraGap = Math.max(12, fontSize * 0.42);
-    let totalH = 0;
-
-    while (fontSize >= 18) {
-      ctx.font = `600 ${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-      wrappedGroups = wrapParagraphsWithGap(ctx, paragraphs, boxWidth);
-      lineH = fontSize * 1.18;
-      paraGap = Math.max(10, fontSize * 0.42);
-      totalH =
-        wrappedGroups.reduce((acc, g) => acc + g.length * lineH, 0) +
-        Math.max(0, wrappedGroups.length - 1) * paraGap;
-      if (totalH <= boxHeight) break;
-      fontSize -= 2;
-    }
-
+    // Dynamic Details Styled Text
     ctx.fillStyle = NAVY;
     ctx.textAlign = 'left';
     ctx.textBaseline = 'top';
-    let drawY = boxTop + Math.max(0, (boxHeight - totalH) / 2);
-    for (let gi = 0; gi < wrappedGroups.length; gi++) {
-      for (const line of wrappedGroups[gi]) {
-        if (drawY + lineH > boxTop + boxHeight + 10) break;
-        ctx.fillText(line, boxLeft, drawY);
-        drawY += lineH;
+    let drawY = layout.textBox.top + (!chosenFit.overflowed ? Math.max(0, (layout.textBox.height - chosenFit.totalH) / 2) : 0);
+    for (let gi = 0; gi < chosenFit.wrapped.length; gi++) {
+      for (const lineTokens of chosenFit.wrapped[gi]) {
+        if (drawY + chosenFit.lineH > layout.textBox.top + layout.textBox.height + 10) break;
+        let runX = layout.textBox.left;
+        for (const tok of lineTokens) {
+          ctx.font = buildCanvasFont(chosenFit.fontSize, tok.bold, tok.italic);
+          ctx.fillText(tok.text, runX, drawY);
+          runX += ctx.measureText(tok.text).width;
+        }
+        drawY += chosenFit.lineH;
       }
-      if (gi < wrappedGroups.length - 1) drawY += paraGap;
+      if (gi < chosenFit.wrapped.length - 1) drawY += chosenFit.paraGap;
     }
 
     // Bottom Navy Contact Banner
     ctx.fillStyle = NAVY;
     ctx.beginPath();
-    ctx.roundRect(36, 842, width - 72, 200, 52);
+    ctx.roundRect(layout.contactRect.left, layout.contactRect.top, layout.contactRect.width, layout.contactRect.height, 50);
     ctx.fill();
 
+    const contactMidY = (layout.contactRect.top + layout.contactRect.bottom) / 2;
+    const phoneR = Math.min(62, layout.contactRect.height * 0.32);
+    const phoneCx = layout.contactRect.left + 108;
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc(144, 942, 64, 0, Math.PI * 2);
+    ctx.arc(phoneCx, contactMidY, phoneR, 0, Math.PI * 2);
     ctx.fill();
 
-    // Tilted Navy Handset inside white circle
     ctx.save();
-    ctx.translate(144, 942);
+    ctx.translate(phoneCx, contactMidY);
+    ctx.scale(phoneR / 64, phoneR / 64);
     ctx.fillStyle = NAVY;
-    ctx.beginPath();
-    ctx.moveTo(-22, -34);
-    ctx.quadraticCurveTo(-34, -32, -34, -18);
-    ctx.bezierCurveTo(-34, 6, -6, 34, 18, 34);
-    ctx.quadraticCurveTo(32, 34, 34, 22);
-    ctx.lineTo(34, 12);
-    ctx.quadraticCurveTo(34, 6, 26, 4);
-    ctx.lineTo(14, 2);
-    ctx.quadraticCurveTo(9, 1, 6, 5);
-    ctx.lineTo(1, 11);
-    ctx.quadraticCurveTo(-8, 6, -11, -1);
-    ctx.lineTo(-5, -6);
-    ctx.quadraticCurveTo(-1, -9, -2, -14);
-    ctx.lineTo(-4, -26);
-    ctx.quadraticCurveTo(-6, -34, -12, -34);
-    ctx.closePath();
-    ctx.fill();
+    drawHandsetPath(ctx);
     ctx.restore();
 
+    const cDivX = layout.contactRect.left + 206;
+    const cDivInset = Math.min(30, layout.contactRect.height * 0.16);
     ctx.strokeStyle = '#FFFFFF';
     ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.moveTo(242, 872);
-    ctx.lineTo(242, 1012);
+    ctx.moveTo(cDivX, layout.contactRect.top + cDivInset);
+    ctx.lineTo(cDivX, layout.contactRect.bottom - cDivInset);
     ctx.stroke();
 
-    const contactStr = `যোগাযোগ: ${record.mobile}`;
-    let mobSize = 86;
-    const mobAreaLeft = 272;
-    const mobAreaW = width - 76 - mobAreaLeft;
-    ctx.font = `bold ${mobSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    while (ctx.measureText(contactStr).width > mobAreaW && mobSize > 22) {
-      mobSize -= 2;
-      ctx.font = `bold ${mobSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    }
+    const mobAreaLeft = cDivX + 30;
+    const mobAreaW = layout.contactRect.right - 36 - mobAreaLeft;
+    ctx.font = `bold ${FIXED_CONTACT_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(contactStr, mobAreaLeft + mobAreaW / 2, 942);
+    ctx.fillText(`যোগাযোগ: ${record.mobile}`, mobAreaLeft + mobAreaW / 2, contactMidY);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
   } else {
-    // LAND FOR SALE: Distinct Forest & Emerald Asymmetric Editorial Layout
-    ctx.fillStyle = '#F3FAF5';
-    ctx.fillRect(0, 0, width, height);
+    // LAND FOR SALE: Distinct Green + White Surveyor & Plot Design using shared Dynamic Layout
+    const FOREST = '#0B5D2E';
+    const EMERALD = '#16A34A';
+    const SOFT_MINT = '#EEFBF3';
+    const PINE_TEXT = '#063B1D';
 
-    // Left emerald forest pillar
-    const leftGrad = ctx.createLinearGradient(0, 0, 0, height);
-    leftGrad.addColorStop(0, '#065F46');
-    leftGrad.addColorStop(1, '#047857');
-    ctx.fillStyle = leftGrad;
-    ctx.fillRect(0, 0, 440, height);
-
-    // Surveyor corner brackets on left pillar
-    ctx.strokeStyle = 'rgba(167, 243, 208, 0.55)';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(42, 42, 356, height - 84);
-
-    ctx.fillStyle = '#A7F3D0';
-    ctx.font = 'bold 22px "JetBrains Mono", monospace';
-    ctx.fillText('LAND LISTING', 76, 120);
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 68px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('LAND', 76, 210);
-    ctx.fillText('FOR', 76, 284);
-    ctx.fillText('SALE', 76, 358);
-
-    ctx.fillStyle = '#D1FAE5';
-    ctx.font = '600 26px "JetBrains Mono", monospace';
-    ctx.fillText(record.recordId, 76, 440);
-    ctx.fillStyle = 'rgba(209, 250, 229, 0.8)';
-    ctx.font = '500 22px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(record.date, 76, 480);
-
-    // Contact badge inside left pillar
-    ctx.fillStyle = '#064E3B';
+    // Double surveyor outer frame
+    ctx.strokeStyle = FOREST;
+    ctx.lineWidth = 6.5;
     ctx.beginPath();
-    ctx.roundRect(68, 800, 304, 176, 24);
-    ctx.fill();
-
-    ctx.fillStyle = '#6EE7B7';
-    ctx.font = 'bold 20px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('CALL OWNER / AGENT', 94, 852);
-
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 34px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(record.mobile, 94, 910);
-
-    ctx.fillStyle = '#A7F3D0';
-    ctx.font = '500 18px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('Property Hub', 94, 952);
-
-    // Right white editorial canvas
-    ctx.fillStyle = '#FFFFFF';
-    ctx.beginPath();
-    ctx.roundRect(496, 72, width - 564, height - 144, 30);
-    ctx.fill();
-    ctx.strokeStyle = '#C7E8D2';
-    ctx.lineWidth = 3;
+    ctx.roundRect(16, 16, width - 32, height - 32, 30);
     ctx.stroke();
 
-    ctx.fillStyle = '#065F46';
-    ctx.font = 'bold 30px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('LAND & PLOT INFORMATION', 550, 152);
+    ctx.strokeStyle = EMERALD;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(26, 26, width - 52, height - 52, 24);
+    ctx.stroke();
 
-    ctx.fillStyle = '#10B981';
-    ctx.fillRect(550, 174, 140, 6);
+    // Top Location Pin + Horizon Boundary Stakes Emblem
+    const hCx = width / 2;
+    const hBottom = layout.headerRect.bottom - 6;
+    const barY = hBottom - 28;
+    ctx.strokeStyle = FOREST;
+    ctx.lineWidth = 6;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(hCx - 540, barY);
+    ctx.lineTo(hCx - 158, barY);
+    ctx.moveTo(hCx + 158, barY);
+    ctx.lineTo(hCx + 540, barY);
+    ctx.stroke();
 
-    const landParagraphs = parseDetailsParagraphs(record.details);
-    let fontSize = 38;
-    let fittedGroups: string[][] = [];
-    let lineHeight = fontSize * 1.32;
-    let paraGap = Math.max(10, fontSize * 0.4);
-    while (fontSize >= 18) {
-      ctx.font = `500 ${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-      fittedGroups = wrapParagraphsWithGap(ctx, landParagraphs, width - 680);
-      lineHeight = fontSize * 1.32;
-      paraGap = Math.max(10, fontSize * 0.4);
-      const totalH =
-        fittedGroups.reduce((acc, g) => acc + g.length * lineHeight, 0) +
-        Math.max(0, fittedGroups.length - 1) * paraGap;
-      if (totalH <= 710) break;
-      fontSize -= 2;
+    ctx.strokeStyle = EMERALD;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(hCx - 496, barY + 12);
+    ctx.lineTo(hCx - 176, barY + 12);
+    ctx.moveTo(hCx + 176, barY + 12);
+    ctx.lineTo(hCx + 496, barY + 12);
+    ctx.stroke();
+
+    drawDiamondMarker(ctx, hCx - 158, barY, 10, FOREST, '#FFFFFF');
+    drawDiamondMarker(ctx, hCx + 158, barY, 10, FOREST, '#FFFFFF');
+    drawDiamondMarker(ctx, hCx - 540, barY, 7, EMERALD, '#FFFFFF');
+    drawDiamondMarker(ctx, hCx + 540, barY, 7, EMERALD, '#FFFFFF');
+
+    ctx.strokeStyle = FOREST;
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(hCx - 122, hBottom);
+    ctx.quadraticCurveTo(hCx, hBottom - 34, hCx + 122, hBottom);
+    ctx.stroke();
+
+    ctx.strokeStyle = EMERALD;
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(hCx - 82, hBottom + 4);
+    ctx.quadraticCurveTo(hCx, hBottom - 16, hCx + 82, hBottom + 4);
+    ctx.stroke();
+
+    const pinCy = layout.headerRect.top + 38;
+    const pinR = 29;
+    ctx.fillStyle = FOREST;
+    ctx.beginPath();
+    ctx.arc(hCx, pinCy, pinR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(hCx - pinR * 0.86, pinCy + pinR * 0.45);
+    ctx.lineTo(hCx, hBottom - 14);
+    ctx.lineTo(hCx + pinR * 0.86, pinCy + pinR * 0.45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(hCx, pinCy, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = EMERALD;
+    ctx.beginPath();
+    ctx.arc(hCx, pinCy, 7.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Architectural Forest Green Title Card ("জমি বিক্রি করা হবে") — FIXED Font Size
+    ctx.fillStyle = FOREST;
+    ctx.beginPath();
+    ctx.roundRect(layout.titleRect.left, layout.titleRect.top, layout.titleRect.width, layout.titleRect.height, 22);
+    ctx.fill();
+
+    const stripW = Math.min(460, layout.titleRect.width * 0.36);
+    const stripL = width / 2 - stripW / 2;
+    ctx.fillStyle = EMERALD;
+    ctx.beginPath();
+    ctx.roundRect(stripL, layout.titleRect.top + 8, stripW, 6, 3);
+    ctx.roundRect(stripL, layout.titleRect.bottom - 14, stripW, 6, 3);
+    ctx.fill();
+
+    const titleMidY = (layout.titleRect.top + layout.titleRect.bottom) / 2;
+    drawDiamondMarker(ctx, layout.titleRect.left + 72, titleMidY, 15, EMERALD, '#FFFFFF');
+    drawDiamondMarker(ctx, layout.titleRect.right - 72, titleMidY, 15, EMERALD, '#FFFFFF');
+
+    ctx.font = `bold ${FIXED_TITLE_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('জমি বিক্রি করা হবে', width / 2, titleMidY);
+
+    // Dynamic Details Card with Soft Mint Left Zone & Survey Plot Graphics
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 24);
+    ctx.fill();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 24);
+    ctx.clip();
+    ctx.fillStyle = SOFT_MINT;
+    ctx.fillRect(layout.detailsCard.left, layout.detailsCard.top, layout.dividerX - layout.detailsCard.left, layout.detailsCard.height);
+    ctx.restore();
+
+    ctx.strokeStyle = FOREST;
+    ctx.lineWidth = 5.5;
+    ctx.beginPath();
+    ctx.roundRect(layout.detailsCard.left, layout.detailsCard.top, layout.detailsCard.width, layout.detailsCard.height, 24);
+    ctx.stroke();
+
+    // Right L-corner surveyor ticks
+    ctx.strokeStyle = EMERALD;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(layout.detailsCard.right - 40, layout.detailsCard.top + 18);
+    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.top + 18);
+    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.top + 40);
+    ctx.moveTo(layout.detailsCard.right - 40, layout.detailsCard.bottom - 18);
+    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.bottom - 18);
+    ctx.lineTo(layout.detailsCard.right - 18, layout.detailsCard.bottom - 40);
+    ctx.stroke();
+
+    // Proportionally scaled Surveyed Land Plot + Trees + Boundary Stakes + Pin Illustration
+    const paneW = layout.dividerX - layout.detailsCard.left;
+    const lScale = Math.min(1.08, Math.min((paneW - 34) / 292, (layout.detailsCard.height - 42) / 302));
+    ctx.save();
+    ctx.translate(layout.detailsCard.left + paneW / 2, (layout.detailsCard.top + layout.detailsCard.bottom) / 2);
+    ctx.scale(lScale, lScale);
+
+    ctx.fillStyle = FOREST;
+    ctx.beginPath();
+    ctx.moveTo(-136, 122);
+    ctx.quadraticCurveTo(0, 96, 136, 122);
+    ctx.quadraticCurveTo(0, 110, -136, 122);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(-84, 18);
+    ctx.lineTo(84, 18);
+    ctx.lineTo(126, 100);
+    ctx.lineTo(-126, 100);
+    ctx.closePath();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fill();
+    ctx.fillStyle = 'rgba(22, 163, 74, 0.15)';
+    ctx.fill();
+
+    ctx.save();
+    ctx.setLineDash([9, 7]);
+    ctx.strokeStyle = EMERALD;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, 18);
+    ctx.lineTo(0, 100);
+    ctx.moveTo(-106, 58);
+    ctx.lineTo(106, 58);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.strokeStyle = FOREST;
+    ctx.lineWidth = 5.5;
+    ctx.beginPath();
+    ctx.moveTo(-84, 18);
+    ctx.lineTo(84, 18);
+    ctx.lineTo(126, 100);
+    ctx.lineTo(-126, 100);
+    ctx.closePath();
+    ctx.stroke();
+
+    // Rear trees
+    for (const [tx, ty, ts] of [
+      [-104, 20, 0.92],
+      [104, 20, 0.85],
+    ]) {
+      ctx.save();
+      ctx.translate(tx, ty);
+      ctx.scale(ts, ts);
+      ctx.fillStyle = FOREST;
+      ctx.fillRect(-4.5, -40, 9, 40);
+      ctx.beginPath();
+      ctx.arc(0, -64, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = EMERALD;
+      ctx.beginPath();
+      ctx.arc(-11, -50, 14, 0, Math.PI * 2);
+      ctx.arc(11, -50, 14, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
 
-    ctx.fillStyle = '#0F172A';
-    ctx.font = `500 ${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
-    let y = 246;
-    for (let gi = 0; gi < fittedGroups.length; gi++) {
-      for (const line of fittedGroups[gi]) {
-        if (y > height - 125) break;
-        ctx.fillText(line, 550, y);
-        y += lineHeight;
+    // Boundary stakes
+    for (const [sx, sy] of [
+      [-84, 18],
+      [84, 18],
+      [-126, 100],
+      [126, 100],
+    ]) {
+      ctx.fillStyle = FOREST;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 8.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = EMERALD;
+      ctx.beginPath();
+      ctx.arc(sx, sy, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Location Pin hovering over parcel center
+    ctx.strokeStyle = EMERALD;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.ellipse(0, 43, 38, 13, 0, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = FOREST;
+    ctx.beginPath();
+    ctx.arc(0, -64, 36, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-30.6, -47.8);
+    ctx.lineTo(0, 36);
+    ctx.lineTo(30.6, -47.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.arc(0, -64, 17, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = EMERALD;
+    ctx.beginPath();
+    ctx.arc(0, -64, 9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    // Meridian vertical divider with emerald diamonds
+    const divInset = Math.min(34, layout.detailsCard.height * 0.12);
+    ctx.strokeStyle = FOREST;
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(layout.dividerX, layout.detailsCard.top + divInset);
+    ctx.lineTo(layout.dividerX, layout.detailsCard.bottom - divInset);
+    ctx.stroke();
+    drawDiamondMarker(ctx, layout.dividerX, layout.detailsCard.top + divInset, 7.5, EMERALD, '#FFFFFF');
+    drawDiamondMarker(ctx, layout.dividerX, layout.detailsCard.bottom - divInset, 7.5, EMERALD, '#FFFFFF');
+
+    // Dynamic Details Styled Text
+    ctx.fillStyle = PINE_TEXT;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    let drawY = layout.textBox.top + (!chosenFit.overflowed ? Math.max(0, (layout.textBox.height - chosenFit.totalH) / 2) : 0);
+    for (let gi = 0; gi < chosenFit.wrapped.length; gi++) {
+      for (const lineTokens of chosenFit.wrapped[gi]) {
+        if (drawY + chosenFit.lineH > layout.textBox.top + layout.textBox.height + 10) break;
+        let runX = layout.textBox.left;
+        for (const tok of lineTokens) {
+          ctx.font = buildCanvasFont(chosenFit.fontSize, tok.bold, tok.italic);
+          ctx.fillText(tok.text, runX, drawY);
+          runX += ctx.measureText(tok.text).width;
+        }
+        drawY += chosenFit.lineH;
       }
-      if (gi < fittedGroups.length - 1) y += paraGap;
+      if (gi < chosenFit.wrapped.length - 1) drawY += chosenFit.paraGap;
     }
+
+    // Bottom Framed Forest Green Contact Card + Rounded-Square Shield Phone Badge
+    ctx.fillStyle = FOREST;
+    ctx.beginPath();
+    ctx.roundRect(layout.contactRect.left, layout.contactRect.top, layout.contactRect.width, layout.contactRect.height, 22);
+    ctx.fill();
+
+    ctx.fillStyle = EMERALD;
+    ctx.beginPath();
+    ctx.roundRect(layout.contactRect.left + 260, layout.contactRect.top + 8, layout.contactRect.width - 324, 5, 2.5);
+    ctx.fill();
+
+    const contactMidY = (layout.contactRect.top + layout.contactRect.bottom) / 2;
+    const badgeSize = Math.min(116, layout.contactRect.height * 0.68);
+    const badgeCx = layout.contactRect.left + 108;
+    const badgeLeft = badgeCx - badgeSize / 2;
+    const badgeTop = contactMidY - badgeSize / 2;
+
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.roundRect(badgeLeft, badgeTop, badgeSize, badgeSize, 24);
+    ctx.fill();
+    ctx.strokeStyle = '#86EFAC';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(badgeLeft + 5, badgeTop + 5, badgeSize - 10, badgeSize - 10, 19);
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(badgeCx, contactMidY);
+    ctx.scale((badgeSize * 0.50) / 56, (badgeSize * 0.50) / 56);
+    ctx.fillStyle = FOREST;
+    drawHandsetPath(ctx);
+    ctx.restore();
+
+    const cDivX = layout.contactRect.left + 206;
+    const cDivInset = Math.min(28, layout.contactRect.height * 0.16);
+    ctx.strokeStyle = '#A7F3D0';
+    ctx.lineWidth = 4.5;
+    ctx.beginPath();
+    ctx.moveTo(cDivX, layout.contactRect.top + cDivInset);
+    ctx.lineTo(cDivX, layout.contactRect.bottom - cDivInset);
+    ctx.stroke();
+
+    const mobAreaLeft = cDivX + 30;
+    const mobAreaW = layout.contactRect.right - 36 - mobAreaLeft;
+    ctx.font = `bold ${FIXED_CONTACT_SIZE}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(`যোগাযোগ: ${record.mobile}`, mobAreaLeft + mobAreaW / 2, contactMidY);
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   }
 
   return canvas.toDataURL('image/jpeg', 0.92);

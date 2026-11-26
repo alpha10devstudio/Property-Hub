@@ -1,11 +1,16 @@
 package com.propertyhub.offline.poster;
 
 import android.graphics.Canvas;
+import android.graphics.Typeface;
 import android.text.Layout;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.text.style.MetricAffectingSpan;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -56,6 +61,55 @@ public final class PosterTextFitter {
         }
     }
 
+    /**
+     * Preserves paragraph.ttf while guaranteeing crisp bold and italic rendering
+     * even when paragraph.ttf is a single-weight Typeface resource.
+     */
+    private static final class MarkdownStyleSpan extends MetricAffectingSpan {
+        @Nullable
+        private final Typeface baseTypeface;
+        private final boolean bold;
+        private final boolean italic;
+
+        MarkdownStyleSpan(@Nullable Typeface baseTypeface, boolean bold, boolean italic) {
+            this.baseTypeface = baseTypeface;
+            this.bold = bold;
+            this.italic = italic;
+        }
+
+        @Override
+        public void updateDrawState(@NonNull TextPaint ds) {
+            applyStyle(ds);
+        }
+
+        @Override
+        public void updateMeasureState(@NonNull TextPaint ds) {
+            applyStyle(ds);
+        }
+
+        private void applyStyle(@NonNull TextPaint paint) {
+            int style = (bold ? Typeface.BOLD : 0) | (italic ? Typeface.ITALIC : 0);
+            if (baseTypeface != null) {
+                Typeface styled = Typeface.create(baseTypeface, style);
+                paint.setTypeface(styled);
+                if (bold && !styled.isBold()) {
+                    paint.setFakeBoldText(true);
+                }
+                if (italic && !styled.isItalic()) {
+                    paint.setTextSkewX(-0.24f);
+                }
+            } else {
+                paint.setTypeface(Typeface.create(paint.getTypeface(), style));
+                if (bold) {
+                    paint.setFakeBoldText(true);
+                }
+                if (italic) {
+                    paint.setTextSkewX(-0.24f);
+                }
+            }
+        }
+    }
+
     private PosterTextFitter() {
     }
 
@@ -68,8 +122,16 @@ public final class PosterTextFitter {
             float startTextSizePx,
             float minTextSizePx
     ) {
-        List<String> paragraphs = DetailsParagraphParser.parse(rawDetails);
-        return fitParagraphs(paragraphs, paint, maxWidthPx, maxHeightPx, startTextSizePx, minTextSizePx);
+        List<List<DetailsParagraphParser.StyledSegment>> styledParagraphs =
+                DetailsParagraphParser.parseStyledParagraphs(rawDetails);
+        return fitStyledParagraphs(
+                styledParagraphs,
+                paint,
+                maxWidthPx,
+                maxHeightPx,
+                startTextSizePx,
+                minTextSizePx
+        );
     }
 
     @NonNull
@@ -81,20 +143,46 @@ public final class PosterTextFitter {
             float startTextSizePx,
             float minTextSizePx
     ) {
-        List<String> safeParagraphs = paragraphs.isEmpty()
-                ? Collections.singletonList("-")
+        List<List<DetailsParagraphParser.StyledSegment>> styled = new ArrayList<>(paragraphs.size());
+        for (String paragraph : paragraphs) {
+            styled.add(DetailsParagraphParser.parseInlineFormatting(paragraph));
+        }
+        return fitStyledParagraphs(
+                styled,
+                paint,
+                maxWidthPx,
+                maxHeightPx,
+                startTextSizePx,
+                minTextSizePx
+        );
+    }
+
+    @NonNull
+    public static FitResult fitStyledParagraphs(
+            @NonNull List<List<DetailsParagraphParser.StyledSegment>> paragraphs,
+            @NonNull TextPaint paint,
+            int maxWidthPx,
+            int maxHeightPx,
+            float startTextSizePx,
+            float minTextSizePx
+    ) {
+        List<List<DetailsParagraphParser.StyledSegment>> safeParagraphs = paragraphs.isEmpty()
+                ? Collections.singletonList(
+                        Collections.singletonList(new DetailsParagraphParser.StyledSegment("-", false, false)))
                 : paragraphs;
 
         int safeWidth = Math.max(120, maxWidthPx);
         float size = startTextSizePx;
         FitResult bestCandidate = null;
+        Typeface baseTypeface = paint.getTypeface();
 
         while (size >= minTextSizePx) {
             float lineSpacingMult = 1.12f;
             float paragraphGap = Math.max(10f, size * 0.42f);
-            FitResult candidate = buildCandidate(
+            FitResult candidate = buildStyledCandidate(
                     safeParagraphs,
                     paint,
+                    baseTypeface,
                     safeWidth,
                     size,
                     lineSpacingMult,
@@ -110,9 +198,10 @@ public final class PosterTextFitter {
         // At minimum font size, try slightly tighter paragraph gap (still visibly larger than line spacing)
         paint.setTextSize(minTextSizePx);
         float tightGap = Math.max(8f, minTextSizePx * 0.30f);
-        FitResult tightCandidate = buildCandidate(
+        FitResult tightCandidate = buildStyledCandidate(
                 safeParagraphs,
                 paint,
+                baseTypeface,
                 safeWidth,
                 minTextSizePx,
                 1.05f,
@@ -122,10 +211,10 @@ public final class PosterTextFitter {
             return tightCandidate;
         }
 
-        // Still overflowing at minimum font size -> report overflow warning cleanly
-        FitResult fallback = bestCandidate != null ? tightCandidate : buildCandidate(
+        FitResult fallback = bestCandidate != null ? tightCandidate : buildStyledCandidate(
                 safeParagraphs,
                 paint,
+                baseTypeface,
                 safeWidth,
                 minTextSizePx,
                 1.05f,
@@ -141,9 +230,10 @@ public final class PosterTextFitter {
     }
 
     @NonNull
-    private static FitResult buildCandidate(
-            @NonNull List<String> paragraphs,
+    public static FitResult buildStyledCandidate(
+            @NonNull List<List<DetailsParagraphParser.StyledSegment>> paragraphs,
             @NonNull TextPaint paint,
+            @Nullable Typeface baseTypeface,
             int widthPx,
             float textSizePx,
             float lineSpacingMult,
@@ -154,9 +244,9 @@ public final class PosterTextFitter {
         float totalHeight = 0f;
 
         for (int i = 0; i < paragraphs.size(); i++) {
-            String para = paragraphs.get(i);
+            CharSequence charSequence = toSpannable(paragraphs.get(i), baseTypeface);
             StaticLayout layout = StaticLayout.Builder
-                    .obtain(para, 0, para.length(), paint, widthPx)
+                    .obtain(charSequence, 0, charSequence.length(), paint, widthPx)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(0f, lineSpacingMult)
                     .setIncludePad(true)
@@ -171,7 +261,32 @@ public final class PosterTextFitter {
         return new FitResult(layouts, paragraphGapPx, Math.round(totalHeight), textSizePx, false);
     }
 
-    private static boolean hasHorizontalWordClip(@NonNull FitResult candidate, int maxWidthPx) {
+    @NonNull
+    private static SpannableStringBuilder toSpannable(
+            @NonNull List<DetailsParagraphParser.StyledSegment> segments,
+            @Nullable Typeface baseTypeface
+    ) {
+        SpannableStringBuilder ssb = new SpannableStringBuilder();
+        for (DetailsParagraphParser.StyledSegment segment : segments) {
+            int start = ssb.length();
+            ssb.append(segment.getText());
+            int end = ssb.length();
+            if (end > start && (segment.isBold() || segment.isItalic())) {
+                ssb.setSpan(
+                        new MarkdownStyleSpan(baseTypeface, segment.isBold(), segment.isItalic()),
+                        start,
+                        end,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                );
+            }
+        }
+        if (ssb.length() == 0) {
+            ssb.append("-");
+        }
+        return ssb;
+    }
+
+    public static boolean hasHorizontalWordClip(@NonNull FitResult candidate, int maxWidthPx) {
         for (StaticLayout layout : candidate.getParagraphLayouts()) {
             for (int line = 0; line < layout.getLineCount(); line++) {
                 if (layout.getLineWidth(line) > maxWidthPx + 2f) {
@@ -203,8 +318,8 @@ public final class PosterTextFitter {
             boolean centerVertically
     ) {
         canvas.save();
-        // Slight vertical bleed margin (4px) preserves tall Bengali diacritics while staying inside card padding
-        canvas.clipRect(x - 2f, y - 4f, x + maxWidthPx + 2f, y + maxHeightPx + 4f);
+        // Slight vertical bleed margin (6px) preserves tall Bengali diacritics inside card padding
+        canvas.clipRect(x - 4f, y - 6f, x + maxWidthPx + 4f, y + maxHeightPx + 6f);
 
         float startY = y;
         if (centerVertically && fitResult.getTotalHeightPx() < maxHeightPx) {
