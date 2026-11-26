@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <attr name="phCanvasBg" format="color" />
+    <attr name="phCardBg" format="color" />
+    <attr name="phCardStroke" format="color" />
+    <attr name="phSubtleSurface" format="color" />
+    <attr name="phTextPrimary" format="color" />
+    <attr name="phTextSecondary" format="color" />
+    <attr name="phInputBg" format="color" />
+    <attr name="phInputStroke" format="color" />
+    <attr name="phNavBg" format="color" />
+    <attr name="phNavBorder" format="color" />
+    <attr name="phAccentBlue" format="color" />
+</resources>

@@ -1,5 +1,9 @@
 package com.propertyhub.offline;
 
+import com.propertyhub.offline.model.PropertyCategory;
+import com.propertyhub.offline.model.PropertyRecord;
+import com.propertyhub.offline.storage.RecordFormatter;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -8,77 +12,63 @@ import static org.junit.Assert.assertTrue;
 public class RecordFormatterTest {
 
     @Test
-    public void firstRecordStartsWithDividerAnd001() {
-        String output = RecordFormatter.appendRecordToContent(
-                "",
-                1,
+    public void formatsRecordWithUniqueRecordIdAndVerbatimDetails() {
+        PropertyRecord record = new PropertyRecord(
+                "HOUSE_000001",
                 "2026-11-26",
                 "09:15 AM",
                 PropertyCategory.HOUSE_FOR_RENT,
-                "01712345678",
-                "2 bedroom house available for rent.\nLocation: Iswarganj, Mymensingh.\nMonthly Rent: 5000 BDT."
+                "+880 1712-345678",
+                "Location: Mymensingh\nTwo Bedroom House\n\nRENT NEGOTIABLE",
+                "2026-11-26.txt"
         );
 
+        String output = RecordFormatter.appendRecordToContent("", record);
         String expected =
-                "====================================\n"
-                        + "PROPERTY RECORD #001\n"
-                        + "Date: 2026-11-26\n"
-                        + "Time: 09:15 AM\n"
-                        + "Category: House for Rent\n"
-                        + "Mobile: 01712345678\n"
-                        + "Details:\n"
-                        + "2 bedroom house available for rent.\n"
-                        + "Location: Iswarganj, Mymensingh.\n"
-                        + "Monthly Rent: 5000 BDT.\n";
+                "========================================\n"
+                        + "PROPERTY RECORD\n"
+                        + "RECORD_ID: HOUSE_000001\n"
+                        + "DATE: 2026-11-26\n"
+                        + "TIME: 09:15 AM\n"
+                        + "CATEGORY: HOUSE_FOR_RENT\n"
+                        + "MOBILE: +880 1712-345678\n"
+                        + "DETAILS:\n"
+                        + "Location: Mymensingh\n"
+                        + "Two Bedroom House\n"
+                        + "\n"
+                        + "RENT NEGOTIABLE\n";
 
         assertEquals(expected, output);
     }
 
     @Test
     public void subsequentRecordAppendsWithoutOverwriting() {
-        String first = RecordFormatter.appendRecordToContent(
-                "",
-                1,
+        PropertyRecord first = new PropertyRecord(
+                "LAND_000001",
                 "2026-11-26",
-                "09:15 AM",
-                PropertyCategory.HOUSE_FOR_RENT,
-                "01712345678",
-                "2 bedroom house"
-        );
-
-        int nextNumber = RecordFormatter.extractHighestRecordNumber(first) + 1;
-        assertEquals(2, nextNumber);
-
-        String second = RecordFormatter.appendRecordToContent(
-                first,
-                nextNumber,
-                "2026-11-26",
-                "10:30 AM",
-                PropertyCategory.HOUSE_FOR_RENT,
-                "01887654321",
-                "Three-room house available.\nLocation: Mymensingh."
-        );
-
-        assertTrue(second.contains("PROPERTY RECORD #001"));
-        assertTrue(second.contains("PROPERTY RECORD #002"));
-        assertTrue(second.contains("01712345678"));
-        assertTrue(second.contains("01887654321"));
-        assertEquals(2, RecordFormatter.extractHighestRecordNumber(second));
-    }
-
-    @Test
-    public void landCategoryUsesLandForSaleLabel() {
-        String output = RecordFormatter.appendRecordToContent(
-                "",
-                1,
-                "2026-11-26",
-                "12:00 PM",
+                "10:00 AM",
                 PropertyCategory.LAND_FOR_SALE,
-                "01911112222",
-                "10 decimal residential plot near main road."
+                "+1 (555) 234-5678",
+                "10 decimal residential plot.",
+                "2026-11-26.txt"
+        );
+        PropertyRecord second = new PropertyRecord(
+                "LAND_000002",
+                "2026-11-26",
+                "04:45 PM",
+                PropertyCategory.LAND_FOR_SALE,
+                "01887654321",
+                "Main road frontage\n30 ft road",
+                "2026-11-26.txt"
         );
 
-        assertTrue(output.contains("Category: Land for Sale"));
-        assertTrue(output.contains("PROPERTY RECORD #001"));
+        String content = RecordFormatter.appendRecordToContent("", first);
+        content = RecordFormatter.appendRecordToContent(content, second);
+
+        assertTrue(content.contains("RECORD_ID: LAND_000001"));
+        assertTrue(content.contains("RECORD_ID: LAND_000002"));
+        assertTrue(content.contains("CATEGORY: LAND_FOR_SALE"));
+        assertTrue(content.contains("+1 (555) 234-5678"));
+        assertTrue(content.contains("01887654321"));
     }
 }

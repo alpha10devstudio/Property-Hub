@@ -1,5 +1,7 @@
 package com.propertyhub.offline;
 
+import com.propertyhub.offline.util.DateTimeProvider;
+
 import org.junit.Test;
 
 import java.util.Calendar;

@@ -1,0 +1,982 @@
+PROPERTY HUB — FINAL MASTER DEVELOPMENT PROMPT
+
+You are a senior Android application developer, UI/UX designer, and software architect. Build a complete, production-quality native Android application named Property Hub.
+
+The application is an offline property data collection, poster generation, and file management tool. It allows users to save house rental and land sale advertisements as TXT records, automatically generate JPG posters, generate posters in bulk from previously saved records, and export generated posters as ZIP archives.
+
+Do not build just a UI prototype. Implement all screens, navigation, storage operations, poster rendering, settings persistence, bulk processing, and ZIP export as working features.
+
+---
+
+1. TECHNICAL REQUIREMENTS
+
+- Platform: Native Android.
+- Programming language: Java.
+- UI: Native Android XML layouts.
+- Minimum Android SDK: 23.
+- Use Android-compatible Java APIs.
+- Use Material Components where appropriate.
+- Use clean, modular, maintainable code.
+- The application must work offline.
+- Do not require Firebase, a remote database, or an online API.
+- Do not use WebView to build the application interface.
+- Do not use emojis or Unicode symbols as interface icons.
+- Use consistent vector drawables or SVG-style vector assets. Material Icons or Lucide-style icons are acceptable.
+- All UI text must be in English.
+- Handle Android lifecycle changes, screen rotations where applicable, and storage permission limitations correctly.
+
+The project must be compatible with GitHub Actions so that a debug APK can be built automatically.
+
+Do not leave important features as placeholders, TODO comments, or nonfunctional buttons.
+
+2. APPLICATION BRANDING AND VISUAL DESIGN
+
+Application name: Property Hub
+
+Tagline:
+
+Collect • Generate • Share
+
+Design direction:
+
+- Modern, clean, professional property management interface.
+- Primary theme: Blue.
+- Main background: Very light blue or soft off-white.
+- Cards: White with subtle borders and rounded corners.
+- Primary buttons: Electric blue.
+- Text: Dark navy or nearly black.
+- Use consistent spacing, typography, corner radius, and icon sizes.
+- Avoid excessive decoration.
+- Use subtle shadows and clear visual hierarchy.
+
+The app should look like a polished modern Android application, not a basic form or HTML webpage.
+
+Create a consistent application header with:
+
+- Property Hub logo/icon.
+- Property Hub name.
+- Tagline.
+- Settings shortcut where appropriate.
+
+3. MAIN NAVIGATION — BOTTOM NAVIGATION BAR
+
+A persistent bottom navigation bar must be present on the main application screens.
+
+It must contain exactly three primary destinations:
+
+A. Collect Data
+
+Icon: Home or clipboard-style vector icon.
+
+Purpose:
+This is the main data collection screen. Users can submit house rental advertisements and land sale advertisements.
+
+When selected:
+
+- Display the property submission interface.
+- Highlight the Collect Data icon and label.
+- Keep the other two destinations inactive.
+
+This must be the default screen when the application opens.
+
+B. Settings
+
+Icon: Settings gear vector icon.
+
+Purpose:
+Users can configure storage location, automatic JPG generation, application theme, and language.
+
+When selected:
+
+- Open the Settings screen.
+- Highlight the Settings icon and label.
+- Do not reset or delete any previously saved data.
+
+C. Generated Files
+
+Icon: Folder vector icon.
+
+Purpose:
+This is the file management and poster generation section.
+
+When selected:
+
+- Show saved TXT records.
+- Provide Bulk Poster Generator.
+- Show generated JPG posters.
+- Provide ZIP export and sharing options.
+- Allow users to select a category and date range.
+
+When selected, highlight the Generated Files icon and label.
+
+Navigation requirements
+
+- The bottom navigation bar must remain consistent across the three main sections.
+- Switching tabs must not recreate or erase form data unnecessarily.
+- The active tab must have a clear visual indicator.
+- Back navigation must behave correctly.
+- Do not create duplicate screen instances every time a navigation item is tapped.
+- Use a single, well-structured navigation approach.
+- Do not place unnecessary navigation bars inside individual tabs.
+
+4. COLLECT DATA — MAIN SCREEN
+
+The main screen contains two independent property submission cards.
+
+Both cards must be visually distinct and easy to use.
+
+CARD 1: HOUSE FOR RENT
+
+Design:
+
+- Blue and navy color scheme.
+- Blue accent border or header.
+- House-related vector icon.
+- White card background.
+- Rounded corners.
+
+Heading:
+
+HOUSE FOR RENT
+
+Fields:
+
+1. Mobile Number
+   
+   - Single-line input.
+   - Accept phone numbers.
+   - Do not force a specific Bangladesh number format.
+   - Do not make it unnecessarily restrictive.
+
+2. Details
+   
+   - Multiline text input.
+   - Large enough for property descriptions.
+   - User can enter address, location, monthly rent, bedroom count, facilities, floor information, and any other details.
+   - These details are free-form text.
+   - Do not create additional mandatory fields.
+   - Do not require address, price, or bedroom information separately.
+
+Button:
+
+Submit House for Rent
+
+On click:
+
+1. Validate that the required submission content is present.
+2. Save the complete original data into the daily House for Rent TXT file.
+3. Generate a unique record ID.
+4. If Auto JPG Image by Submit is ON, generate the matching house poster.
+5. Show an appropriate success or partial-success message.
+6. Clear the submitted form only after the TXT record has been safely saved.
+
+CARD 2: LAND FOR SALE
+
+Design:
+
+- Dark green and emerald color scheme.
+- Land-related vector icon.
+- Green accent border or header.
+- White card background.
+- Rounded corners.
+
+Heading:
+
+LAND FOR SALE
+
+Fields:
+
+1. Mobile Number
+   
+   - Single-line input.
+   - Accept phone numbers.
+
+2. Details
+   
+   - Multiline text input.
+   - Users can enter location, land area, price, road access, land type, nearby facilities, and any other information.
+   - Free-form text.
+   - No additional mandatory fields.
+   - Never force users to enter structured property information.
+
+Button:
+
+Submit Land for Sale
+
+On click:
+
+1. Save the original data into the daily Land for Sale TXT file.
+2. Generate a unique record ID.
+3. If Auto JPG Image by Submit is ON, generate the matching land poster.
+4. Show the appropriate result message.
+5. Clear the form only after successful TXT storage.
+
+Important form behavior
+
+The two cards must work independently.
+
+Submitting a house must never save it in the Land for Sale file.
+
+Submitting land must never save it in the House for Rent file.
+
+Do not merge the two categories into one TXT file.
+
+Do not change, summarize, translate, or rewrite the user's Details text.
+
+Preserve the original user-entered details exactly as entered, including line breaks and punctuation.
+
+5. STORAGE LOCATION AND DIRECTORY STRUCTURE
+
+Use Android Storage Access Framework (SAF).
+
+When the user first opens the application, or when no storage directory has been selected, ask the user to choose a parent directory using:
+
+"ACTION_OPEN_DOCUMENT_TREE"
+
+Persist the URI permission using "takePersistableUriPermission()".
+
+Do not depend on deprecated direct external storage APIs.
+
+Do not request unnecessary MANAGE_EXTERNAL_STORAGE permission.
+
+After the user selects the parent directory, create and manage the following structure:
+
+Property Hub/
+│
+├── House for Rent/
+│   ├── 2026-11-26.txt
+│   ├── 2026-11-27.txt
+│   └── ...
+│
+├── Land for Sale/
+│   ├── 2026-11-26.txt
+│   ├── 2026-11-27.txt
+│   └── ...
+│
+├── Generated Posters/
+│   ├── House for Rent/
+│   │   ├── House_001.jpg
+│   │   ├── House_002.jpg
+│   │   └── ...
+│   │
+│   └── Land for Sale/
+│       ├── Land_001.jpg
+│       ├── Land_002.jpg
+│       └── ...
+│
+└── ZIP Exports/
+
+This is the required logical folder structure. Create folders automatically when needed.
+
+If the user changes the storage location:
+
+- Ask for confirmation.
+- Do not delete the old directory.
+- Do not silently move or overwrite existing records.
+- Continue using the newly selected directory for future operations.
+- Clearly show the currently selected storage location in Settings.
+
+6. DAILY TXT FILE SYSTEM
+
+Create one TXT file per category per local calendar day.
+
+Examples:
+
+"House for Rent/2026-11-26.txt"
+
+"Land for Sale/2026-11-26.txt"
+
+If the user submits multiple properties in the same category on the same day, append all records to the existing daily file.
+
+Never create a separate TXT file for every submission.
+
+When the local calendar date changes, create a new daily file automatically.
+
+Use the device's local date and time. Do not use UTC date conversion.
+
+TXT RECORD FORMAT
+
+Use a consistent, reliable format similar to:
+
+========================================
+PROPERTY RECORD
+RECORD_ID: HOUSE_000001
+DATE: 2026-11-26
+TIME: 09:15 AM
+CATEGORY: HOUSE_FOR_RENT
+MOBILE: 017XXXXXXXX
+DETAILS:
+Iswarganj, Mymensingh.
+Two bedroom house available.
+Monthly rent negotiable.
+
+For land records:
+
+========================================
+PROPERTY RECORD
+RECORD_ID: LAND_000001
+DATE: 2026-11-26
+TIME: 10:20 AM
+CATEGORY: LAND_FOR_SALE
+MOBILE: 017XXXXXXXX
+DETAILS:
+Land available near main road.
+Price negotiable.
+
+These are format examples only. Actual DETAILS must contain the exact text supplied by the user.
+
+Record ID requirements
+
+- Each record must have a unique and stable ID.
+- House and land records must have separate ID prefixes.
+- IDs must not reset when a new day starts.
+- IDs must never be reused after deletion or failure.
+- Store the record ID in the TXT file.
+- Use the same ID to identify its generated poster.
+- Use the ID to prevent duplicate poster generation.
+
+For example:
+
+"HOUSE_000001"
+
+"HOUSE_000002"
+
+"LAND_000001"
+
+This prevents filename collisions across different dates.
+
+Data safety
+
+- Never overwrite an existing daily TXT file.
+- Never delete previous records automatically.
+- Never silently discard an incomplete or failed write.
+- Use safe append operations.
+- Handle unexpected app termination carefully.
+- Show clear error messages if storage is unavailable.
+- If TXT saving fails, do not report a successful submission.
+
+7. POSTER GENERATION SYSTEM
+
+This is one of the most important features.
+
+The application must generate professional property advertisement posters using Android Canvas or another reliable native Android graphics-rendering method.
+
+Do not use online image generation.
+
+Do not download property images.
+
+Do not use stock photos.
+
+Do not use AI-generated property photos.
+
+Do not use external property photographs.
+
+The posters must be created entirely from:
+
+- Native graphics.
+- Background gradients.
+- Geometric shapes.
+- Color blocks.
+- Typography.
+- Lines and borders.
+- Vector-style decorative elements.
+
+FINAL POSTER DIMENSIONS
+
+<IMPORTANT>Poster aspect ratio: 4:3 Landscape
+
+Exact dimensions:
+
+1440 × 1080 pixels
+
+Format: JPG / JPEG
+
+Quality: 90–95%
+
+Orientation: Landscape
+
+Every generated poster must use this exact aspect ratio and dimensions.
+
+Do not use 3:4 portrait.
+
+Do not use 1080 × 1440.
+
+Do not use square images.
+
+</IMPORTANT>A. HOUSE FOR RENT POSTER DESIGN
+
+Create a dedicated professional design for House for Rent.
+
+Color palette:
+
+- Deep navy blue.
+- Royal blue.
+- Electric blue accents.
+- Light blue.
+- White.
+
+Visual style:
+
+- Modern.
+- Premium.
+- Clean.
+- Professional.
+- Real-estate advertisement style.
+
+Suggested layout:
+
+Top section:
+
+- Main heading: HOUSE FOR RENT
+- Supporting heading: PROPERTY AVAILABLE
+- Property Hub branding.
+
+Middle section:
+
+- A clean, attractive property details panel.
+- Complete original Details text.
+- Clear typography and sufficient spacing.
+
+Bottom section:
+
+- Dedicated CONTACT OWNER section.
+- Display the actual mobile number prominently.
+- Use a blue contact panel with white text.
+
+Use tasteful geometric elements and gradients.
+
+Do not invent property features or values.
+
+B. LAND FOR SALE POSTER DESIGN
+
+Create a completely different dedicated design for Land for Sale.
+
+Do not simply recolor the House for Rent poster.
+
+Color palette:
+
+- Dark forest green.
+- Emerald green.
+- Light green.
+- White.
+
+Visual style:
+
+- Premium.
+- Professional.
+- Clean.
+- Modern land advertisement style.
+
+Suggested layout:
+
+Top section:
+
+- Main heading: LAND FOR SALE
+- Supporting heading: LAND AVAILABLE
+- Property Hub branding.
+
+Middle section:
+
+- A dedicated land information panel.
+- Complete original Details text.
+- Clean typography and visual hierarchy.
+
+Bottom section:
+
+- Dedicated CONTACT OWNER section.
+- Display the actual mobile number prominently.
+- Use a green contact panel with white text.
+
+Use different graphic patterns, borders, section shapes, and visual composition from the House for Rent design.
+
+Both poster categories must have their own separate rendering templates.
+
+POSTER CONTENT RULES
+
+1. Display the complete original Details text.
+2. Display the Mobile Number in a dedicated contact area.
+3. Do not invent a location, price, land area, rent, room count, or facilities.
+4. Do not guess missing information.
+5. Do not rewrite the user's text.
+6. Do not silently truncate long descriptions.
+7. If the content is long, calculate text wrapping and adjust font size and layout intelligently.
+8. Maintain readability.
+9. Never allow text to overlap.
+10. Never allow important text to be clipped.
+11. If a description cannot fit while remaining readable, show a clear warning and allow the user to review it instead of producing a misleading poster.
+
+The poster renderer must be shared by both automatic generation and bulk generation. Do not create two different rendering implementations.
+
+8. AUTO JPG IMAGE BY SUBMIT — SETTINGS FEATURE
+
+Add this exact setting:
+
+Auto JPG Image by Submit
+
+Description:
+
+"Automatically generate a poster after every submission."
+
+Use a modern toggle switch.
+
+When ON
+
+After every successful submission:
+
+1. Save the TXT record first.
+2. Confirm that the TXT record was saved.
+3. Generate the corresponding JPG poster.
+4. Save the poster inside the matching category folder.
+5. Use the same RECORD_ID as the TXT record.
+6. Update the poster generation status.
+
+Example:
+
+House submission:
+
+TXT:
+"House for Rent/2026-11-26.txt"
+
+Poster:
+"Generated Posters/House for Rent/House_000001.jpg"
+
+Land submission:
+
+TXT:
+"Land for Sale/2026-11-26.txt"
+
+Poster:
+"Generated Posters/Land for Sale/Land_000001.jpg"
+
+When OFF
+
+- Save only the TXT record.
+- Do not generate a JPG automatically.
+- The user can later generate posters through Generated Files → Bulk Poster Generator.
+
+Failure handling
+
+If TXT saving succeeds but poster generation fails:
+
+- Never delete or roll back the TXT record.
+- Display:
+
+"Property data saved successfully, but poster generation failed. You can retry."
+
+- Provide a Retry Poster option.
+- Preserve the record ID.
+- Prevent duplicate posters when retrying.
+
+If both operations succeed, display:
+
+"Property saved and poster generated successfully!"
+
+Important
+
+- Save the toggle state persistently using SharedPreferences or an appropriate persistent settings mechanism.
+- The toggle must remain in its previous state after the app is closed or restarted.
+- Do not change TXT saving behavior when this setting changes.
+- Run poster generation on a background thread.
+- Never freeze the UI during image rendering.
+
+9. SETTINGS SCREEN
+
+Create a dedicated Settings screen based on the supplied Settings reference image.
+
+Use the same blue and white design language as the application.
+
+Settings screen heading:
+
+Settings
+
+Include the following options:
+
+1. Storage Location
+
+Icon: Folder vector icon.
+
+Display:
+
+- Storage Location
+- Current selected folder name.
+- Selected folder path when available.
+
+On click:
+
+- Open Android folder picker.
+- Allow the user to select a new storage location.
+- Persist the new URI permission.
+- Show a confirmation dialog before changing the location.
+
+2. Auto JPG Image by Submit
+
+Icon: Image vector icon.
+
+Display:
+
+- Auto JPG Image by Submit
+- "Automatically generate a poster after every submission."
+
+Use an ON/OFF toggle.
+
+3. App Theme
+
+Icon: Palette vector icon.
+
+Options:
+
+- Blue (Default)
+- Light
+- Dark
+
+Persist the selected theme.
+
+Apply the theme consistently across all application screens.
+
+4. Language
+
+Icon: Globe vector icon.
+
+For the first version:
+
+- English
+
+Structure the code so that additional languages can be added later.
+
+5. About Property Hub
+
+Icon: Information vector icon.
+
+Display:
+
+- Application name.
+- Version number.
+- Short description:
+
+"A complete offline property management tool."
+
+6. Back to Home
+
+Provide a prominent button:
+
+Back to Home
+
+It should navigate to Collect Data without clearing saved information.
+
+10. GENERATED FILES SCREEN
+
+The Generated Files destination must be a fully functional file management area.
+
+It must not be an empty placeholder.
+
+Create a clean interface with the following sections:
+
+A. Saved Property Records
+
+Allow users to browse:
+
+- House for Rent records.
+- Land for Sale records.
+
+Allow filtering by:
+
+- Category.
+- Date.
+- All Dates.
+
+Show:
+
+- Record ID.
+- Date.
+- Mobile Number.
+- A readable preview of Details.
+- Poster generation status.
+
+Provide an option to view the complete record.
+
+B. Bulk Poster Generator
+
+Add a prominent feature:
+
+Bulk Poster Generator
+
+Purpose:
+
+Read previously saved TXT records and generate posters automatically without asking the user to enter the same information again.
+
+Workflow
+
+1. User opens Bulk Poster Generator.
+2. User selects a category:
+   - House for Rent
+   - Land for Sale
+   - Both Categories
+3. User selects:
+   - Specific date
+   - Date range
+   - All Dates
+4. Application scans the selected daily TXT files.
+5. Parse individual PROPERTY RECORD entries.
+6. Identify each record's category, ID, mobile number, and original Details.
+7. Generate one JPG poster per eligible record.
+8. Save each poster in its corresponding category folder.
+
+Progress interface
+
+Display:
+
+- Total records found.
+- Records already having posters.
+- Records waiting for generation.
+- Successfully generated posters.
+- Failed posters.
+- Current processing record.
+- Progress percentage.
+- Progress bar.
+
+Provide:
+
+- Start Generation.
+- Cancel.
+- Retry Failed.
+- View Generated Posters.
+
+Performance requirements
+
+The application must be designed to handle 1,000+ records, depending on available device storage and memory.
+
+- Process records sequentially or in controlled batches.
+- Do not load all full-resolution bitmaps into memory at once.
+- Release each bitmap after saving.
+- Avoid OutOfMemoryError.
+- Keep the UI responsive.
+- Support cancellation safely.
+- Preserve completed posters if processing is cancelled.
+- Allow failed records to be retried later.
+
+Duplicate prevention
+
+Before generating a poster:
+
+- Check whether a valid poster already exists for the record ID.
+- If it exists, skip it by default.
+- Do not generate duplicate posters.
+- Provide a clear count of skipped records.
+
+If a user explicitly chooses to regenerate a poster, ask for confirmation before replacing the existing image.
+
+11. ZIP EXPORT SYSTEM
+
+Add a separate section:
+
+ZIP Exports
+
+The user must be able to export successfully generated posters as ZIP archives.
+
+Options:
+
+- House for Rent.
+- Land for Sale.
+- Both Categories.
+- Specific Date.
+- Date Range.
+- All Dates.
+
+ZIP naming
+
+Use clear filenames, for example:
+
+"Property_Hub_House_Rent_2026-11-26.zip"
+
+"Property_Hub_Land_Sale_2026-11-26.zip"
+
+For multiple dates:
+
+"Property_Hub_House_Rent_All_Dates.zip"
+
+Use an appropriate date-range filename when a date range is selected.
+
+ZIP contents
+
+- Include only successfully generated JPG posters matching the selected category and date range.
+- Do not include TXT files unless the user explicitly selects a separate option for including records.
+- Do not include failed or incomplete images.
+- Avoid duplicate ZIP entries.
+- Verify the archive can be opened after creation.
+- Display the archive filename and total image count.
+- Provide Open and Share actions.
+
+Save ZIP files inside:
+
+"Property Hub/ZIP Exports/"
+
+Use Android-compatible file sharing, preferably FileProvider or SAF URI-based sharing.
+
+12. GENERATED POSTER VIEWER
+
+Inside Generated Files, allow users to browse generated posters.
+
+Include:
+
+- Separate House for Rent and Land for Sale sections.
+- Image preview.
+- Record ID.
+- Generation date.
+- Original TXT record reference.
+
+Provide actions:
+
+- View.
+- Share.
+- Retry generation if missing or failed.
+- Regenerate with confirmation if already generated.
+
+Do not accidentally delete original TXT records when managing JPG files.
+
+13. DATA INTEGRITY AND ERROR HANDLING
+
+This is an offline data management application. Data safety is essential.
+
+Implement the following safeguards:
+
+- TXT must be saved before automatic poster generation.
+- A failed JPG operation must never destroy a saved TXT record.
+- Never overwrite daily TXT files.
+- Preserve all existing records.
+- Use unique record IDs.
+- Prevent duplicate poster generation.
+- Handle missing folders.
+- Handle revoked SAF permissions.
+- Handle insufficient storage.
+- Handle malformed TXT records.
+- Handle corrupted or incomplete images.
+- Handle app interruption during bulk processing.
+- Display clear, user-friendly error messages.
+
+If an old TXT record cannot be parsed, do not silently discard it. Report the affected file or record and continue processing other valid records where safe.
+
+Use reliable file operations and background execution for long-running tasks.
+
+14. CODE ARCHITECTURE
+
+Keep the project modular.
+
+Suggested separation:
+
+- MainActivity: Application entry point and main navigation.
+- CollectDataFragment or equivalent: Two independent submission forms.
+- SettingsFragment or equivalent: Settings.
+- GeneratedFilesFragment or equivalent: File browsing and export.
+- StorageManager: SAF directory handling and TXT file operations.
+- PropertyRecord: Property record model.
+- RecordParser: TXT record parsing.
+- RecordIdManager: Unique ID generation.
+- PosterRenderer: Shared 4:3 poster rendering engine.
+- HousePosterTemplate: House-specific visual template.
+- LandPosterTemplate: Land-specific visual template.
+- AutoPosterManager: Automatic poster generation.
+- BulkPosterManager: Bulk poster processing.
+- ZipExportManager: ZIP archive creation and validation.
+- SettingsManager: Persistent application settings.
+
+You may improve the architecture if needed, but maintain separation of responsibilities.
+
+Do not duplicate poster rendering code.
+
+Do not put the entire application implementation into one enormous Activity class.
+
+15. GITHUB ACTIONS BUILD REQUIREMENTS
+
+The project must build using GitHub Actions.
+
+Provide:
+
+- Complete Android project structure.
+- Gradle wrapper.
+- Correct Gradle and Android Gradle Plugin compatibility.
+- Required dependencies.
+- GitHub Actions workflow YAML.
+- Debug APK build task.
+- APK artifact upload.
+
+The workflow should:
+
+1. Check out the repository.
+2. Set up the required JDK.
+3. Set up the Android build environment as needed.
+4. Run Gradle build.
+5. Build the debug APK.
+6. Upload the APK as a downloadable artifact.
+
+Do not introduce unnecessary dependencies.
+
+Make sure all required resources, XML files, Java classes, and manifest declarations are included.
+
+16. FINAL UI QUALITY CHECKLIST
+
+Before considering the application complete, verify:
+
+- Collect Data opens by default.
+- Bottom navigation has exactly three destinations.
+- Collect Data opens the two separate property forms.
+- House and land submissions are independent.
+- Each category saves into its own daily TXT file.
+- Multiple same-day submissions append correctly.
+- New days create new TXT files.
+- Original Details text remains unchanged.
+- Record IDs remain unique.
+- Storage location can be selected and persisted.
+- Auto JPG Image by Submit works in both ON and OFF states.
+- House posters use the dedicated blue design.
+- Land posters use the dedicated green design.
+- Both poster designs are visually different.
+- Every poster is exactly 1440 × 1080 pixels.
+- Every poster uses 4:3 Landscape.
+- No property photos or external images are used.
+- No text is silently truncated.
+- Bulk Poster Generator reads existing TXT records.
+- Bulk processing can handle large record collections without exhausting memory.
+- Duplicate posters are prevented.
+- Failed posters can be retried.
+- ZIP export includes the correct images.
+- ZIP files are valid and shareable.
+- Settings persist after restarting the app.
+- Theme selection works.
+- All navigation buttons work.
+- No crashes occur during normal usage.
+- The project builds successfully through GitHub Actions.
+
+17. DEVELOPMENT INSTRUCTIONS
+
+First inspect and plan the entire project architecture.
+
+Then implement the complete application.
+
+Do not stop after producing a design preview.
+
+Do not provide only XML mockups.
+
+Do not leave buttons without functionality.
+
+Do not use fake sample data as actual saved records.
+
+Do not remove existing functionality when improving another feature.
+
+Prioritize correct data storage, reliable poster rendering, and stable navigation over unnecessary animations.
+
+After implementation:
+
+1. Review the entire source code.
+2. Resolve Java compilation errors.
+3. Resolve XML resource errors.
+4. Verify manifest permissions and declarations.
+5. Check all navigation destinations.
+6. Test the TXT append and parsing logic.
+7. Test automatic poster generation.
+8. Test bulk poster generation.
+9. Test ZIP export.
+10. Ensure the GitHub Actions workflow can build the APK.
+
+If you encounter a technical limitation, explain it and implement the safest working alternative instead of silently omitting the feature.
+
+FINAL GOAL: Deliver a complete, polished, offline-first Android application called Property Hub that collects house rental and land sale information, stores daily TXT records safely, generates two distinct professional 4:3 landscape JPG poster designs, supports automatic and bulk generation, and exports posters as ZIP archives.

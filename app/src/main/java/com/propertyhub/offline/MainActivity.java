@@ -7,63 +7,70 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.provider.DocumentsContract;
-import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.annotation.IdRes;
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.fragment.app.FragmentTransaction;
 
+import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.propertyhub.offline.export.ZipExportManager;
+import com.propertyhub.offline.model.AppThemeMode;
+import com.propertyhub.offline.model.PropertyCategory;
+import com.propertyhub.offline.poster.AutoPosterManager;
+import com.propertyhub.offline.poster.BulkPosterManager;
+import com.propertyhub.offline.poster.PosterRenderer;
+import com.propertyhub.offline.storage.SettingsManager;
+import com.propertyhub.offline.storage.StorageManager;
+import com.propertyhub.offline.ui.CollectDataFragment;
+import com.propertyhub.offline.ui.GeneratedFilesFragment;
+import com.propertyhub.offline.ui.MainHostCallbacks;
+import com.propertyhub.offline.ui.SettingsFragment;
 
-import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements MainHostCallbacks {
 
-    private static final long SUBMIT_DEBOUNCE_MS = 700L;
-    private static final long TOP_TOAST_DURATION_MS = 2400L;
+    private static final long TOP_TOAST_DURATION_MS = 2600L;
+    private static final String STATE_ACTIVE_NAV_ID = "state_active_nav_id";
+    private static final String TAG_COLLECT = "tab_collect";
+    private static final String TAG_SETTINGS = "tab_settings";
+    private static final String TAG_FILES = "tab_files";
 
-    private SafStorageManager storageManager;
-    private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
+    private SettingsManager settingsManager;
+    private StorageManager storageManager;
+    private PosterRenderer posterRenderer;
+    private AutoPosterManager autoPosterManager;
+    private BulkPosterManager bulkPosterManager;
+    private ZipExportManager zipExportManager;
+
+    private final ExecutorService hostIoExecutor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    private final AtomicBoolean isSubmittingHouse = new AtomicBoolean(false);
-    private final AtomicBoolean isSubmittingLand = new AtomicBoolean(false);
-    private long lastHouseSubmitElapsedMs = 0L;
-    private long lastLandSubmitElapsedMs = 0L;
-
-    // House for Rent views
-    private EditText etHouseMobile;
-    private EditText etHouseDetails;
-    private Button btnSubmitHouse;
-
-    // Land for Sale views
-    private EditText etLandMobile;
-    private EditText etLandDetails;
-    private Button btnSubmitLand;
-
-    // Storage prompt / status banner
+    private BottomNavigationView bottomNavigation;
     private View storageWarningBanner;
     private TextView tvStorageWarningText;
     private Button btnBannerSelectFolder;
 
-    // Top-sliding auto-dismissing toast notification
     private View topToastCard;
     private ImageView ivTopToastIcon;
     private TextView tvTopToastTitle;
@@ -71,7 +78,11 @@ public class MainActivity extends AppCompatActivity {
     private final Runnable hideTopToastRunnable = this::hideTopToastAnimated;
 
     private AlertDialog storageSetupDialog;
+    @Nullable
     private PropertyCategory pendingSubmitCategory;
+    @IdRes
+    private int activeNavId = R.id.nav_collect_data;
+    private boolean suppressNavListener = false;
 
     private final ActivityResultLauncher<Intent> directoryPickerLauncher =
             registerForActivityResult(
@@ -85,32 +96,50 @@ public class MainActivity extends AppCompatActivity {
                             }
                         }
                         pendingSubmitCategory = null;
-                        refreshStorageBannerState();
+                        refreshStorageBanner();
                     }
             );
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        settingsManager = new SettingsManager(this);
+        applySelectedThemeResource(settingsManager.getThemeMode());
+
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        storageManager = new SafStorageManager(this);
+        storageManager = new StorageManager(this, settingsManager, new com.propertyhub.offline.util.DateTimeProvider());
+        posterRenderer = new PosterRenderer();
+        autoPosterManager = new AutoPosterManager(storageManager, posterRenderer, hostIoExecutor);
+        bulkPosterManager = new BulkPosterManager(storageManager, posterRenderer);
+        zipExportManager = new ZipExportManager(this, storageManager);
 
-        bindViews();
-        wireInteractions();
+        if (savedInstanceState != null) {
+            activeNavId = savedInstanceState.getInt(STATE_ACTIVE_NAV_ID, R.id.nav_collect_data);
+        }
+
+        bindHeaderAndNavViews();
+        initFragments(savedInstanceState);
+        setupBackNavigation();
 
         if (!storageManager.hasValidStorageAccess()) {
-            refreshStorageBannerState();
+            refreshStorageBanner();
             showStorageSetupDialog(true);
         } else {
-            refreshStorageBannerState();
+            refreshStorageBanner();
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt(STATE_ACTIVE_NAV_ID, activeNavId);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        refreshStorageBannerState();
+        refreshStorageBanner();
     }
 
     @Override
@@ -120,16 +149,29 @@ public class MainActivity extends AppCompatActivity {
         if (storageSetupDialog != null && storageSetupDialog.isShowing()) {
             storageSetupDialog.dismiss();
         }
-        ioExecutor.shutdown();
+        bulkPosterManager.shutdown();
+        zipExportManager.shutdown();
+        hostIoExecutor.shutdown();
     }
 
-    private void bindViews() {
-        ImageButton btnSettings = findViewById(R.id.btnSettings);
-        btnSettings.setOnClickListener(v -> showStorageSetupDialog(false));
+    private void applySelectedThemeResource(@NonNull AppThemeMode mode) {
+        if (mode == AppThemeMode.DARK) {
+            setTheme(R.style.Theme_PropertyHub_Dark);
+        } else if (mode == AppThemeMode.LIGHT) {
+            setTheme(R.style.Theme_PropertyHub_Light);
+        } else {
+            setTheme(R.style.Theme_PropertyHub_Blue);
+        }
+    }
+
+    private void bindHeaderAndNavViews() {
+        ImageButton btnHeaderSettings = findViewById(R.id.btnHeaderSettings);
+        btnHeaderSettings.setOnClickListener(v -> navigateToNavDestination(R.id.nav_settings));
 
         storageWarningBanner = findViewById(R.id.storageWarningBanner);
         tvStorageWarningText = findViewById(R.id.tvStorageWarningText);
         btnBannerSelectFolder = findViewById(R.id.btnBannerSelectFolder);
+        btnBannerSelectFolder.setOnClickListener(v -> requestDirectoryPicker(null));
 
         topToastCard = findViewById(R.id.topToastCard);
         ivTopToastIcon = findViewById(R.id.ivTopToastIcon);
@@ -140,156 +182,150 @@ public class MainActivity extends AppCompatActivity {
             hideTopToastAnimated();
         });
 
-        etHouseMobile = findViewById(R.id.etHouseMobile);
-        etHouseDetails = findViewById(R.id.etHouseDetails);
-        btnSubmitHouse = findViewById(R.id.btnSubmitHouse);
-
-        etLandMobile = findViewById(R.id.etLandMobile);
-        etLandDetails = findViewById(R.id.etLandDetails);
-        btnSubmitLand = findViewById(R.id.btnSubmitLand);
-    }
-
-    private void wireInteractions() {
-        btnBannerSelectFolder.setOnClickListener(v -> launchDirectoryPicker());
-
-        btnSubmitHouse.setOnClickListener(v -> onHouseSubmitClicked());
-        btnSubmitLand.setOnClickListener(v -> onLandSubmitClicked());
-    }
-
-    private void onHouseSubmitClicked() {
-        long nowElapsed = SystemClock.elapsedRealtime();
-        if (nowElapsed - lastHouseSubmitElapsedMs < SUBMIT_DEBOUNCE_MS) {
-            return;
-        }
-        if (!validateInputs(etHouseMobile, etHouseDetails)) {
-            return;
-        }
-
-        if (!storageManager.hasValidStorageAccess()) {
-            pendingSubmitCategory = PropertyCategory.HOUSE_FOR_RENT;
-            refreshStorageBannerState();
-            showStorageSetupDialog(true);
-            return;
-        }
-
-        if (!isSubmittingHouse.compareAndSet(false, true)) {
-            return;
-        }
-        lastHouseSubmitElapsedMs = nowElapsed;
-
-        final String mobile = etHouseMobile.getText().toString().trim();
-        final String details = etHouseDetails.getText().toString().trim();
-        setHouseSubmittingUi(true);
-
-        submitRecordAsync(PropertyCategory.HOUSE_FOR_RENT, mobile, details);
-    }
-
-    private void onLandSubmitClicked() {
-        long nowElapsed = SystemClock.elapsedRealtime();
-        if (nowElapsed - lastLandSubmitElapsedMs < SUBMIT_DEBOUNCE_MS) {
-            return;
-        }
-        if (!validateInputs(etLandMobile, etLandDetails)) {
-            return;
-        }
-
-        if (!storageManager.hasValidStorageAccess()) {
-            pendingSubmitCategory = PropertyCategory.LAND_FOR_SALE;
-            refreshStorageBannerState();
-            showStorageSetupDialog(true);
-            return;
-        }
-
-        if (!isSubmittingLand.compareAndSet(false, true)) {
-            return;
-        }
-        lastLandSubmitElapsedMs = nowElapsed;
-
-        final String mobile = etLandMobile.getText().toString().trim();
-        final String details = etLandDetails.getText().toString().trim();
-        setLandSubmittingUi(true);
-
-        submitRecordAsync(PropertyCategory.LAND_FOR_SALE, mobile, details);
-    }
-
-    private void submitRecordAsync(
-            @NonNull PropertyCategory category,
-            @NonNull String mobile,
-            @NonNull String details
-    ) {
-        ioExecutor.execute(() -> {
-            StorageResult result = storageManager.savePropertyRecord(category, mobile, details);
-            mainHandler.post(() -> {
-                if (isFinishing() || isDestroyed()) {
-                    return;
-                }
-                if (category == PropertyCategory.HOUSE_FOR_RENT) {
-                    isSubmittingHouse.set(false);
-                    setHouseSubmittingUi(false);
-                } else {
-                    isSubmittingLand.set(false);
-                    setLandSubmittingUi(false);
-                }
-                handleStorageResult(result);
-            });
+        bottomNavigation = findViewById(R.id.bottomNavigation);
+        bottomNavigation.setOnItemSelectedListener(item -> {
+            if (suppressNavListener) {
+                return true;
+            }
+            switchToTab(item.getItemId());
+            return true;
         });
     }
 
-    private void handleStorageResult(@NonNull StorageResult result) {
-        if (result.isSuccess()) {
-            if (result.getCategory() == PropertyCategory.HOUSE_FOR_RENT) {
-                etHouseMobile.setText("");
-                etHouseDetails.setText("");
-                etHouseMobile.setError(null);
-                etHouseDetails.setError(null);
-            } else {
-                etLandMobile.setText("");
-                etLandDetails.setText("");
-                etLandMobile.setError(null);
-                etLandDetails.setError(null);
-            }
+    private void initFragments(@Nullable Bundle savedInstanceState) {
+        FragmentManager fm = getSupportFragmentManager();
+        if (savedInstanceState == null) {
+            CollectDataFragment collectFragment = new CollectDataFragment();
+            SettingsFragment settingsFragment = new SettingsFragment();
+            GeneratedFilesFragment filesFragment = new GeneratedFilesFragment();
 
-            refreshStorageBannerState();
-
-            showTopSuccessToast(
-                    result.getCategory(),
-                    result.getRecordNumber(),
-                    result.getDisplayPath()
-            );
+            fm.beginTransaction()
+                    .add(R.id.fragmentContainer, collectFragment, TAG_COLLECT)
+                    .add(R.id.fragmentContainer, settingsFragment, TAG_SETTINGS)
+                    .hide(settingsFragment)
+                    .add(R.id.fragmentContainer, filesFragment, TAG_FILES)
+                    .hide(filesFragment)
+                    .commit();
         } else {
-            refreshStorageBannerState();
-            if (result.isPermissionMissing()) {
-                pendingSubmitCategory = result.getCategory();
-                new MaterialAlertDialogBuilder(this)
-                        .setTitle("Folder Access Required")
-                        .setMessage(result.getErrorMessage())
-                        .setPositiveButton("Select Folder", (d, w) -> launchDirectoryPicker())
-                        .setNegativeButton("Cancel", (d, w) -> pendingSubmitCategory = null)
-                        .show();
+            switchToTab(activeNavId);
+        }
+
+        suppressNavListener = true;
+        bottomNavigation.setSelectedItemId(activeNavId);
+        suppressNavListener = false;
+    }
+
+    private void switchToTab(@IdRes int menuId) {
+        FragmentManager fm = getSupportFragmentManager();
+        Fragment collect = fm.findFragmentByTag(TAG_COLLECT);
+        Fragment settings = fm.findFragmentByTag(TAG_SETTINGS);
+        Fragment files = fm.findFragmentByTag(TAG_FILES);
+
+        FragmentTransaction tx = fm.beginTransaction();
+        if (collect != null) {
+            if (menuId == R.id.nav_collect_data) {
+                tx.show(collect);
             } else {
-                new MaterialAlertDialogBuilder(this)
-                        .setTitle("Could Not Save Record")
-                        .setMessage(result.getErrorMessage())
-                        .setPositiveButton("OK", null)
-                        .show();
+                tx.hide(collect);
             }
+        }
+        if (settings != null) {
+            if (menuId == R.id.nav_settings) {
+                tx.show(settings);
+            } else {
+                tx.hide(settings);
+            }
+        }
+        if (files != null) {
+            if (menuId == R.id.nav_generated_files) {
+                tx.show(files);
+            } else {
+                tx.hide(files);
+            }
+        }
+        tx.commitAllowingStateLoss();
+        activeNavId = menuId;
+
+        if (menuId == R.id.nav_settings && settings instanceof SettingsFragment) {
+            ((SettingsFragment) settings).refreshUi();
+        } else if (menuId == R.id.nav_generated_files && files instanceof GeneratedFilesFragment) {
+            ((GeneratedFilesFragment) files).refreshAllData();
         }
     }
 
-    private void showTopSuccessToast(
-            @NonNull PropertyCategory category,
-            int recordNumber,
-            @NonNull String displayPath
+    private void setupBackNavigation() {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (activeNavId != R.id.nav_collect_data) {
+                    navigateToNavDestination(R.id.nav_collect_data);
+                } else {
+                    setEnabled(false);
+                    getOnBackPressedDispatcher().onBackPressed();
+                    setEnabled(true);
+                }
+            }
+        });
+    }
+
+    @NonNull
+    @Override
+    public StorageManager getStorageManager() {
+        return storageManager;
+    }
+
+    @NonNull
+    @Override
+    public SettingsManager getSettingsManager() {
+        return settingsManager;
+    }
+
+    @NonNull
+    @Override
+    public PosterRenderer getPosterRenderer() {
+        return posterRenderer;
+    }
+
+    @NonNull
+    @Override
+    public AutoPosterManager getAutoPosterManager() {
+        return autoPosterManager;
+    }
+
+    @NonNull
+    @Override
+    public BulkPosterManager getBulkPosterManager() {
+        return bulkPosterManager;
+    }
+
+    @NonNull
+    @Override
+    public ZipExportManager getZipExportManager() {
+        return zipExportManager;
+    }
+
+    @Override
+    public void requestDirectoryPicker(@Nullable PropertyCategory pendingCategory) {
+        this.pendingSubmitCategory = pendingCategory;
+        if (pendingCategory != null) {
+            showStorageSetupDialog(true);
+        } else {
+            launchDirectoryPicker();
+        }
+    }
+
+    @Override
+    public void showTopToast(
+            @NonNull String title,
+            @NonNull String subtitle,
+            boolean isHouseTheme
     ) {
         mainHandler.removeCallbacks(hideTopToastRunnable);
 
-        String recordLabel = String.format(Locale.US, "#%03d", recordNumber);
-        tvTopToastTitle.setText(category.getDisplayName() + " " + recordLabel + " Saved");
-        tvTopToastMessage.setText(displayPath);
+        tvTopToastTitle.setText(title);
+        tvTopToastMessage.setText(subtitle);
 
-        int tintColor = category == PropertyCategory.HOUSE_FOR_RENT
-                ? 0xFF60A5FA
-                : 0xFF22C55E;
+        int tintColor = isHouseTheme ? 0xFF60A5FA : 0xFF22C55E;
         ivTopToastIcon.setColorFilter(tintColor);
 
         topToastCard.animate().cancel();
@@ -331,71 +367,45 @@ public class MainActivity extends AppCompatActivity {
                 .start();
     }
 
-    private boolean validateInputs(@NonNull EditText mobileField, @NonNull EditText detailsField) {
-        String mobile = mobileField.getText() == null ? "" : mobileField.getText().toString().trim();
-        String details = detailsField.getText() == null ? "" : detailsField.getText().toString().trim();
-
-        boolean valid = true;
-
-        if (TextUtils.isEmpty(mobile)) {
-            mobileField.setError("Please enter a mobile number");
-            mobileField.requestFocus();
-            valid = false;
-        } else if (!isValidMobileNumber(mobile)) {
-            mobileField.setError("Enter a valid mobile number (at least 6 digits)");
-            mobileField.requestFocus();
-            valid = false;
+    @Override
+    public void navigateToNavDestination(@IdRes int navMenuItemId) {
+        if (bottomNavigation != null) {
+            bottomNavigation.setSelectedItemId(navMenuItemId);
         } else {
-            mobileField.setError(null);
+            switchToTab(navMenuItemId);
         }
+    }
 
-        if (TextUtils.isEmpty(details)) {
-            detailsField.setError("Please enter property details");
-            if (valid) {
-                detailsField.requestFocus();
-            }
-            valid = false;
-        } else {
-            detailsField.setError(null);
+    @Override
+    public void applyThemeMode(@NonNull AppThemeMode themeMode) {
+        settingsManager.setThemeMode(themeMode);
+        recreate();
+    }
+
+    @Override
+    public void refreshStorageBanner() {
+        if (storageWarningBanner == null) {
+            return;
         }
-
-        return valid;
-    }
-
-    private boolean isValidMobileNumber(@NonNull String mobile) {
-        int digitCount = 0;
-        for (int i = 0; i < mobile.length(); i++) {
-            char c = mobile.charAt(i);
-            if (Character.isDigit(c)) {
-                digitCount++;
-            } else if (c != '+' && c != '-' && c != ' ' && c != '(' && c != ')') {
-                return false;
-            }
-        }
-        return digitCount >= 6;
-    }
-
-    private void setHouseSubmittingUi(boolean submitting) {
-        btnSubmitHouse.setEnabled(!submitting);
-        btnSubmitHouse.setText(submitting
-                ? getString(R.string.saving_record)
-                : getString(R.string.submit_house_for_rent));
-    }
-
-    private void setLandSubmittingUi(boolean submitting) {
-        btnSubmitLand.setEnabled(!submitting);
-        btnSubmitLand.setText(submitting
-                ? getString(R.string.saving_record)
-                : getString(R.string.submit_land_for_sale));
-    }
-
-    private void refreshStorageBannerState() {
         boolean hasAccess = storageManager.hasValidStorageAccess();
         if (hasAccess) {
             storageWarningBanner.setVisibility(View.GONE);
         } else {
             storageWarningBanner.setVisibility(View.VISIBLE);
             tvStorageWarningText.setText(getString(R.string.storage_banner_missing));
+        }
+
+        Fragment settings = getSupportFragmentManager().findFragmentByTag(TAG_SETTINGS);
+        if (settings instanceof SettingsFragment) {
+            ((SettingsFragment) settings).refreshUi();
+        }
+    }
+
+    @Override
+    public void notifyFilesUpdated() {
+        Fragment files = getSupportFragmentManager().findFragmentByTag(TAG_FILES);
+        if (files instanceof GeneratedFilesFragment) {
+            ((GeneratedFilesFragment) files).refreshAllData();
         }
     }
 
@@ -413,9 +423,9 @@ public class MainActivity extends AppCompatActivity {
 
         boolean valid = storageManager.hasValidStorageAccess();
         if (valid) {
-            String path = storageManager.getSelectedFolderDisplayName();
-            tvStatus.setText("Active folder: " + path
-                    + "\nSubfolders: House for Rent & Land for Sale");
+            String path = storageManager.getSelectedFolderDisplayPath();
+            tvStatus.setText("Active folder: " + (path != null ? path : "/Property Hub")
+                    + "\nSubfolders: House for Rent, Land for Sale, Generated Posters & ZIP Exports");
             btnSelectFolder.setText(R.string.change_storage_folder);
             btnClose.setText(R.string.done);
         } else {
@@ -468,27 +478,30 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleSelectedTreeUri(@NonNull Uri treeUri) {
-        ioExecutor.execute(() -> {
+        hostIoExecutor.execute(() -> {
             boolean ok = storageManager.initializeDirectoryFromTreeUri(treeUri);
             mainHandler.post(() -> {
                 if (isFinishing() || isDestroyed()) {
                     return;
                 }
-                refreshStorageBannerState();
-                if (ok) {
-                    String displayFolder = storageManager.getSelectedFolderDisplayName();
-                    Toast.makeText(
-                            this,
-                            "Storage ready: " + displayFolder,
-                            Toast.LENGTH_SHORT
-                    ).show();
+                refreshStorageBanner();
+                notifyFilesUpdated();
 
-                    if (pendingSubmitCategory == PropertyCategory.HOUSE_FOR_RENT) {
-                        pendingSubmitCategory = null;
-                        onHouseSubmitClicked();
-                    } else if (pendingSubmitCategory == PropertyCategory.LAND_FOR_SALE) {
-                        pendingSubmitCategory = null;
-                        onLandSubmitClicked();
+                if (ok) {
+                    String displayFolder = storageManager.getSelectedFolderDisplayPath();
+                    showTopToast(
+                            "Storage Folder Ready",
+                            displayFolder != null ? displayFolder : "Property Hub",
+                            true
+                    );
+
+                    PropertyCategory pending = pendingSubmitCategory;
+                    pendingSubmitCategory = null;
+                    if (pending != null) {
+                        Fragment collect = getSupportFragmentManager().findFragmentByTag(TAG_COLLECT);
+                        if (collect instanceof CollectDataFragment) {
+                            ((CollectDataFragment) collect).retryPendingSubmission(pending);
+                        }
                     }
                 } else {
                     pendingSubmitCategory = null;

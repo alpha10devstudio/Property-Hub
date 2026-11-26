@@ -7,5 +7,17 @@
         <item name="colorOnSecondary">@color/white</item>
         <item name="android:statusBarColor">@color/header_navy_start</item>
         <item name="android:windowBackground">@color/canvas_bg</item>
+
+        <item name="phCanvasBg">@color/canvas_bg</item>
+        <item name="phCardBg">@color/white</item>
+        <item name="phCardStroke">@color/blue_card_stroke</item>
+        <item name="phSubtleSurface">@color/subtle_surface_blue</item>
+        <item name="phTextPrimary">@color/text_primary</item>
+        <item name="phTextSecondary">@color/text_hint</item>
+        <item name="phInputBg">@color/white</item>
+        <item name="phInputStroke">@color/input_border</item>
+        <item name="phNavBg">@color/white</item>
+        <item name="phNavBorder">@color/nav_border_light</item>
+        <item name="phAccentBlue">@color/blue_primary</item>
     </style>
 </resources>

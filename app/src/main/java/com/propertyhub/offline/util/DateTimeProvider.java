@@ -1,4 +1,4 @@
-package com.propertyhub.offline;
+package com.propertyhub.offline.util;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
