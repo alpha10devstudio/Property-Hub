@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="180dp"
+    android:height="92dp"
+    android:viewportWidth="180"
+    android:viewportHeight="92">
+    <!-- Sky backdrop clipped diagonally on left -->
+    <path
+        android:fillColor="#CFE7FF"
+        android:pathData="M42,0 L180,0 L180,92 L0,92 Z" />
+    <path
+        android:fillColor="#E9F4FF"
+        android:pathData="M62,0 L180,0 L180,55 L35,55 Z" />
+    <!-- Soft clouds -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillAlpha="0.85"
+        android:pathData="M68,16 C73,16 76,12 81,13 C85,10 92,12 94,17 C98,18 98,23 93,23 L66,23 C62,23 63,16 68,16 Z" />
+    <!-- Lawn -->
+    <path
+        android:fillColor="#3A8F3E"
+        android:pathData="M14,76 L180,76 L180,92 L0,92 Z" />
+    <!-- Left trees -->
+    <path
+        android:fillColor="#2D7A36"
+        android:pathData="M45,78 C36,78 32,69 37,62 C33,55 41,47 49,50 C55,44 65,49 64,58 C70,62 67,74 59,78 Z" />
+    <path
+        android:fillColor="#43A047"
+        android:pathData="M56,79 C50,79 47,73 50,68 C48,63 54,58 59,61 C64,57 70,61 69,68 C73,71 71,78 65,79 Z" />
+    <!-- Modern 2-story villa body -->
+    <path
+        android:fillColor="#F5F7FA"
+        android:pathData="M72,22 L122,12 L156,22 L156,82 L72,82 Z" />
+    <!-- Right wing dark facade -->
+    <path
+        android:fillColor="#526071"
+        android:pathData="M138,24 L158,29 L158,82 L138,82 Z" />
+    <!-- Roof slab -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M68,24 L122,10 L160,21 L157,26 L122,16 L71,29 Z" />
+    <!-- Warm lit upper windows -->
+    <path
+        android:fillColor="#FFB74D"
+        android:pathData="M82,29 H104 V47 H82 Z M110,27 H134 V47 H110 Z" />
+    <!-- Glass frame mullions -->
+    <path
+        android:fillColor="#263238"
+        android:pathData="M92,29 H94 V47 H92 Z M121,27 H123 V47 H121 Z" />
+    <!-- Balcony floor & glass rail -->
+    <path
+        android:fillColor="#CFD8DC"
+        android:pathData="M75,47 H137 V51 H75 Z" />
+    <path
+        android:fillColor="#37474F"
+        android:fillAlpha="0.65"
+        android:pathData="M77,42 H135 V47 H77 Z" />
+    <!-- Ground floor warm lit windows & entrance -->
+    <path
+        android:fillColor="#FFA726"
+        android:pathData="M82,58 H104 V80 H82 Z M110,58 H134 V80 H110 Z" />
+    <path
+        android:fillColor="#263238"
+        android:pathData="M92,58 H94 V80 H92 Z M121,58 H123 V80 H121 Z" />
+    <!-- Foreground bushes -->
+    <path
+        android:fillColor="#2E7D32"
+        android:pathData="M64,84 C64,77 73,74 79,79 C84,75 93,78 93,85 Z M144,84 C146,76 156,74 162,79 C168,76 177,80 177,87 L142,87 Z" />
+    <!-- Diagonal blue blend on left edge -->
+    <path
+        android:fillColor="#1565C0"
+        android:fillAlpha="0.72"
+        android:pathData="M0,0 L56,0 L20,92 L0,92 Z" />
+    <path
+        android:fillColor="#1565C0"
+        android:fillAlpha="0.35"
+        android:pathData="M42,0 L68,0 L32,92 L6,92 Z" />
+</vector>

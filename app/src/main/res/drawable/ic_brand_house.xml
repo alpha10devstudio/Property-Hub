@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="44dp"
+    android:height="44dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- Roof -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M24,8 L5,23 L8.5,26.5 L24,14.5 L39.5,26.5 L43,23 Z" />
+    <!-- Chimney -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M33,12 L37,12 L37,19.5 L33,16.5 Z" />
+    <!-- 4-pane window -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M18.5,25 H23 V29.5 H18.5 Z M25,25 H29.5 V29.5 H25 Z M18.5,31.5 H23 V36 H18.5 Z M25,31.5 H29.5 V36 H25 Z" />
+</vector>

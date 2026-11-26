@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="white">#FFFFFFFF</color>
+    <color name="canvas_bg">#EDF2FA</color>
+    <color name="header_navy_start">#062D80</color>
+    <color name="header_navy_end">#0D47B8</color>
+    <color name="header_subtitle">#D7E4FF</color>
+
+    <color name="text_primary">#0B1F44</color>
+    <color name="text_hint">#7A889E</color>
+    <color name="input_border">#C4D3E8</color>
+    <color name="input_border_focused_blue">#0B41AD</color>
+    <color name="input_border_focused_green">#0B8A38</color>
+
+    <color name="blue_primary">#0B41AD</color>
+    <color name="blue_banner_start">#06328E</color>
+    <color name="blue_banner_end">#1565C0</color>
+    <color name="blue_badge_bg">#DCEBFF</color>
+    <color name="blue_icon">#0D47A1</color>
+    <color name="blue_card_stroke">#D8E2F2</color>
+
+    <color name="green_primary">#0B8A38</color>
+    <color name="green_banner_start">#007E2F</color>
+    <color name="green_banner_end">#14AE47</color>
+    <color name="green_badge_bg">#D6F5E0</color>
+    <color name="green_icon">#0B8A38</color>
+    <color name="green_card_stroke">#D3EAD9</color>
+
+    <color name="warning_bg">#FFF4E5</color>
+    <color name="warning_border">#F5C27B</color>
+    <color name="warning_text">#7A4600</color>
+</resources>

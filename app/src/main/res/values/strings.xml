@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Property Hub</string>
+    <string name="app_subtitle">Post Your Property Easily</string>
+    <string name="settings_desc">Storage Folder Settings</string>
+
+    <string name="house_for_rent_title">House for Rent</string>
+    <string name="house_for_rent_subtitle">Find the right tenant</string>
+    <string name="land_for_sale_title">Land for Sale</string>
+    <string name="land_for_sale_subtitle">Sell Your Land Easily</string>
+
+    <string name="mobile_number_label">Mobile Number</string>
+    <string name="details_label">Details</string>
+
+    <string name="hint_mobile_number">Enter mobile number</string>
+    <string name="hint_house_details">Enter address, rent amount, house type, rooms, etc…</string>
+    <string name="hint_land_details">Enter location, land area, price, road access, etc…</string>
+
+    <string name="submit_house_for_rent">Submit House for Rent</string>
+    <string name="submit_land_for_sale">Submit Land for Sale</string>
+    <string name="saving_record">Saving…</string>
+
+    <string name="storage_banner_missing">Folder access is needed to save records offline.</string>
+    <string name="select_folder_action">Select Folder</string>
+    <string name="dialog_storage_title">Offline Storage Folder</string>
+    <string name="dialog_storage_instructions">Choose a parent folder (such as Documents). Property Hub will create:\n\n• Property Hub/House for Rent/\n• Property Hub/Land for Sale/\n\nEach day creates one text file (yyyy-MM-dd.txt) per category.</string>
+    <string name="select_storage_folder">Select Folder</string>
+    <string name="change_storage_folder">Change Folder</string>
+    <string name="later">Later</string>
+    <string name="close">Close</string>
+    <string name="done">Done</string>
+</resources>
