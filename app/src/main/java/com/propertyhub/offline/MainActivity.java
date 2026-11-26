@@ -12,9 +12,12 @@ import android.provider.DocumentsContract;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.animation.AccelerateInterpolator;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -34,6 +37,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class MainActivity extends AppCompatActivity {
 
     private static final long SUBMIT_DEBOUNCE_MS = 700L;
+    private static final long TOP_TOAST_DURATION_MS = 2400L;
 
     private SafStorageManager storageManager;
     private final ExecutorService ioExecutor = Executors.newSingleThreadExecutor();
@@ -58,6 +62,13 @@ public class MainActivity extends AppCompatActivity {
     private View storageWarningBanner;
     private TextView tvStorageWarningText;
     private Button btnBannerSelectFolder;
+
+    // Top-sliding auto-dismissing toast notification
+    private View topToastCard;
+    private ImageView ivTopToastIcon;
+    private TextView tvTopToastTitle;
+    private TextView tvTopToastMessage;
+    private final Runnable hideTopToastRunnable = this::hideTopToastAnimated;
 
     private AlertDialog storageSetupDialog;
     private PropertyCategory pendingSubmitCategory;
@@ -105,6 +116,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        mainHandler.removeCallbacks(hideTopToastRunnable);
         if (storageSetupDialog != null && storageSetupDialog.isShowing()) {
             storageSetupDialog.dismiss();
         }
@@ -118,6 +130,15 @@ public class MainActivity extends AppCompatActivity {
         storageWarningBanner = findViewById(R.id.storageWarningBanner);
         tvStorageWarningText = findViewById(R.id.tvStorageWarningText);
         btnBannerSelectFolder = findViewById(R.id.btnBannerSelectFolder);
+
+        topToastCard = findViewById(R.id.topToastCard);
+        ivTopToastIcon = findViewById(R.id.ivTopToastIcon);
+        tvTopToastTitle = findViewById(R.id.tvTopToastTitle);
+        tvTopToastMessage = findViewById(R.id.tvTopToastMessage);
+        topToastCard.setOnClickListener(v -> {
+            mainHandler.removeCallbacks(hideTopToastRunnable);
+            hideTopToastAnimated();
+        });
 
         etHouseMobile = findViewById(R.id.etHouseMobile);
         etHouseDetails = findViewById(R.id.etHouseDetails);
@@ -230,16 +251,11 @@ public class MainActivity extends AppCompatActivity {
 
             refreshStorageBannerState();
 
-            String recordLabel = String.format(Locale.US, "#%03d", result.getRecordNumber());
-            String message = result.getCategory().getDisplayName()
-                    + " record " + recordLabel + " saved to:\n"
-                    + result.getDisplayPath();
-
-            new MaterialAlertDialogBuilder(this)
-                    .setTitle("Saved Successfully")
-                    .setMessage(message)
-                    .setPositiveButton("OK", null)
-                    .show();
+            showTopSuccessToast(
+                    result.getCategory(),
+                    result.getRecordNumber(),
+                    result.getDisplayPath()
+            );
         } else {
             refreshStorageBannerState();
             if (result.isPermissionMissing()) {
@@ -258,6 +274,61 @@ public class MainActivity extends AppCompatActivity {
                         .show();
             }
         }
+    }
+
+    private void showTopSuccessToast(
+            @NonNull PropertyCategory category,
+            int recordNumber,
+            @NonNull String displayPath
+    ) {
+        mainHandler.removeCallbacks(hideTopToastRunnable);
+
+        String recordLabel = String.format(Locale.US, "#%03d", recordNumber);
+        tvTopToastTitle.setText(category.getDisplayName() + " " + recordLabel + " Saved");
+        tvTopToastMessage.setText(displayPath);
+
+        int tintColor = category == PropertyCategory.HOUSE_FOR_RENT
+                ? 0xFF60A5FA
+                : 0xFF22C55E;
+        ivTopToastIcon.setColorFilter(tintColor);
+
+        topToastCard.animate().cancel();
+        if (topToastCard.getVisibility() != View.VISIBLE) {
+            topToastCard.setVisibility(View.VISIBLE);
+            topToastCard.setAlpha(0f);
+            topToastCard.post(() -> {
+                if (isFinishing() || isDestroyed()) {
+                    return;
+                }
+                float startY = -(topToastCard.getHeight() + 48f);
+                topToastCard.setTranslationY(startY);
+                topToastCard.animate()
+                        .translationY(0f)
+                        .alpha(1f)
+                        .setDuration(240L)
+                        .setInterpolator(new DecelerateInterpolator())
+                        .start();
+            });
+        } else {
+            topToastCard.setTranslationY(0f);
+            topToastCard.setAlpha(1f);
+        }
+
+        mainHandler.postDelayed(hideTopToastRunnable, TOP_TOAST_DURATION_MS);
+    }
+
+    private void hideTopToastAnimated() {
+        if (isFinishing() || isDestroyed() || topToastCard.getVisibility() != View.VISIBLE) {
+            return;
+        }
+        float endY = -(topToastCard.getHeight() + 48f);
+        topToastCard.animate()
+                .translationY(endY)
+                .alpha(0f)
+                .setDuration(200L)
+                .setInterpolator(new AccelerateInterpolator())
+                .withEndAction(() -> topToastCard.setVisibility(View.GONE))
+                .start();
     }
 
     private boolean validateInputs(@NonNull EditText mobileField, @NonNull EditText detailsField) {

@@ -151,10 +151,35 @@ export default function App() {
     message: string;
     isError?: boolean;
   } | null>(null);
+  const [topToast, setTopToast] = useState<{
+    title: string;
+    message: string;
+    category: CategoryKey;
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const [selectedFile, setSelectedFile] = useState<{
     category: CategoryKey;
     fileName: string;
   } | null>(null);
+
+  function triggerTopToast(title: string, message: string, category: CategoryKey) {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setTopToast({ title, message, category });
+    toastTimerRef.current = window.setTimeout(() => {
+      setTopToast(null);
+      toastTimerRef.current = null;
+    }, 2400);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     try {
@@ -233,13 +258,11 @@ export default function App() {
     setSelectedFile({ category: 'house', fileName });
     setHouseMobile('');
     setHouseDetails('');
-    setFeedbackModal({
-      title: 'Saved Successfully',
-      message: `House for Rent record #${String(nextNum).padStart(
-        3,
-        '0'
-      )} saved to Property Hub/House for Rent/${fileName}`,
-    });
+    triggerTopToast(
+      `House for Rent #${String(nextNum).padStart(3, '0')} Saved`,
+      `Property Hub/House for Rent/${fileName}`,
+      'house'
+    );
   }
 
   function handleLandSubmit(e: React.FormEvent) {
@@ -291,13 +314,11 @@ export default function App() {
     setSelectedFile({ category: 'land', fileName });
     setLandMobile('');
     setLandDetails('');
-    setFeedbackModal({
-      title: 'Saved Successfully',
-      message: `Land for Sale record #${String(nextNum).padStart(
-        3,
-        '0'
-      )} saved to Property Hub/Land for Sale/${fileName}`,
-    });
+    triggerTopToast(
+      `Land for Sale #${String(nextNum).padStart(3, '0')} Saved`,
+      `Property Hub/Land for Sale/${fileName}`,
+      'land'
+    );
   }
 
   function handleAdvanceDay() {
@@ -321,7 +342,37 @@ export default function App() {
         <div className="grid grid-cols-1 items-start gap-8 lg:grid-cols-12">
           {/* Left Column: Faithful Android Mobile UI Preview */}
           <div className="lg:col-span-5">
-            <div className="mx-auto max-w-[420px] overflow-hidden rounded-[28px] bg-[#EDF2FA] shadow-xl ring-1 ring-[#D4E0F3]">
+            <div className="relative mx-auto max-w-[420px] overflow-hidden rounded-[28px] bg-[#EDF2FA] shadow-xl ring-1 ring-[#D4E0F3]">
+              {/* Top-Sliding Auto-Dismissing Toast Notification */}
+              <div
+                aria-live="polite"
+                className={`pointer-events-none absolute inset-x-3.5 top-2.5 z-30 transition-all duration-200 ease-out ${
+                  topToast
+                    ? 'translate-y-0 opacity-100'
+                    : '-translate-y-full opacity-0'
+                }`}
+              >
+                {topToast && (
+                  <div className="pointer-events-auto flex items-center gap-3 rounded-2xl border border-slate-700 bg-[#0F172A] px-3.5 py-2.5 text-white shadow-lg">
+                    <CheckCircle2
+                      className={`h-5 w-5 shrink-0 ${
+                        topToast.category === 'house'
+                          ? 'text-blue-400'
+                          : 'text-emerald-400'
+                      }`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13.5px] font-bold leading-tight">
+                        {topToast.title}
+                      </p>
+                      <p className="mt-0.5 truncate font-mono text-[11.5px] text-slate-300">
+                        {topToast.message}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Top Royal Navy Header */}
               <header className="relative rounded-b-[26px] bg-gradient-to-r from-[#062D80] to-[#0D47B8] px-4 py-4 text-white shadow-sm">
                 <div className="flex items-center justify-between gap-2">
