@@ -2,6 +2,25 @@ plugins {
     id 'com.android.application'
 }
 
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { stream ->
+        keystoreProperties.load(stream)
+    }
+}
+
+def releaseStoreFilePath = keystoreProperties.getProperty('storeFile') ?: System.getenv('ANDROID_KEYSTORE_PATH')
+def releaseStoreType = keystoreProperties.getProperty('storeType') ?: (System.getenv('ANDROID_KEYSTORE_TYPE') ?: 'PKCS12')
+def releaseStorePassword = keystoreProperties.getProperty('storePassword') ?: System.getenv('ANDROID_STORE_PASSWORD')
+def releaseKeyAlias = keystoreProperties.getProperty('keyAlias') ?: System.getenv('ANDROID_KEY_ALIAS')
+def releaseKeyPassword = keystoreProperties.getProperty('keyPassword') ?: System.getenv('ANDROID_KEY_PASSWORD')
+def releaseStoreFile = releaseStoreFilePath
+        ? (new File(releaseStoreFilePath).isAbsolute() ? new File(releaseStoreFilePath) : rootProject.file(releaseStoreFilePath))
+        : null
+def hasReleaseSigning = releaseStoreFile != null && releaseStoreFile.exists() &&
+        releaseStorePassword && releaseKeyAlias && releaseKeyPassword
+
 android {
     namespace 'com.propertyhub.offline'
     compileSdk 35
@@ -10,14 +29,30 @@ android {
         applicationId "com.propertyhub.offline"
         minSdk 23
         targetSdk 35
+        // Increment versionCode on every update (1 -> 2 -> 3...) alongside the same release keystore.
         versionCode 1
         versionName "1.0.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        release {
+            if (hasReleaseSigning) {
+                storeFile releaseStoreFile
+                storeType releaseStoreType
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

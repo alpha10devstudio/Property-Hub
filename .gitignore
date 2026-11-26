@@ -12,4 +12,9 @@ local.properties
 app/build/
 .idea/
 captures/
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
 

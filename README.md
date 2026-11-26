@@ -30,6 +30,23 @@ Property Hub/
 - **Settings & Themes**: Storage location switching (never deletes existing files), `Auto JPG Image by Submit` toggle, and `Blue (Default)` / `Light` / `Dark` app themes.
 - **ZIP Exports**: Archives filtered JPG posters (and optionally TXT records) and verifies every entry using `ZipInputStream`.
 
+## Build Signed Release APK (Alpha 10 Dev Studio Release Signing)
+
+To update Property Hub on Android without *"App not installed / signatures do not match"* conflicts, all release builds are signed with the **Alpha 10 Dev Studio** PKCS12 master keystore (`alpha10-release.p12`, alias `alpha10-release`) and increment `versionCode` in `app/build.gradle`:
+
+1. **GitHub Actions (Automated Signed APK)**:
+   Configure these 4 repository secrets under **Settings → Secrets and variables → Actions**:
+   - `ANDROID_KEYSTORE_BASE64`: Base64 content of `alpha10-release.p12`
+   - `KEYSTORE_PASSWORD`: Master keystore password
+   - `KEY_ALIAS`: `alpha10-release`
+   - `KEY_PASSWORD`: Key password
+
+   On every build, `.github/workflows/build.yml` decodes `alpha10-release.p12` into `${{ runner.temp }}`, builds `app-release.apk`, verifies it with `apksigner verify --verbose --print-certs`, compares its SHA-256 certificate fingerprint against `alpha10-release.p12`, and uploads **PropertyHub-release-apk** (`app-release.apk`).
+2. **Local Android Studio Signed Build**:
+   Copy `keystore.properties.example` to `keystore.properties` (gitignored), fill in your credentials, and run `./gradlew assembleRelease` or **Build → Generate Signed Bundle / APK**.
+3. **Releasing Future Updates**:
+   Keep `applicationId "com.propertyhub.offline"` and the same `alpha10-release.p12` keystore, and increment `versionCode` (e.g., `1` → `2` → `3`) in `app/build.gradle`.
+
 ## Build Debug APK with GitHub Actions
 
 1. Push this repository to GitHub (`main` or `master` branch).
