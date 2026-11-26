@@ -1,9 +1,11 @@
 package com.propertyhub.offline.poster;
 
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.propertyhub.offline.model.PropertyCategory;
 import com.propertyhub.offline.model.PropertyRecord;
@@ -16,6 +18,17 @@ public class PosterRenderer {
     public static final int POSTER_HEIGHT = 1080;
     public static final int JPEG_QUALITY = 92;
 
+    @Nullable
+    private final Context appContext;
+
+    public PosterRenderer() {
+        this.appContext = null;
+    }
+
+    public PosterRenderer(@NonNull Context context) {
+        this.appContext = context.getApplicationContext();
+    }
+
     @NonNull
     public PosterRenderResult renderPoster(@NonNull PropertyRecord record) {
         Bitmap bitmap = null;
@@ -25,9 +38,9 @@ public class PosterRenderer {
 
             boolean overflowed;
             if (record.getCategory() == PropertyCategory.HOUSE_FOR_RENT) {
-                overflowed = HousePosterTemplate.render(canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
+                overflowed = HousePosterTemplate.render(appContext, canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
             } else {
-                overflowed = LandPosterTemplate.render(canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
+                overflowed = LandPosterTemplate.render(appContext, canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream(256 * 1024);

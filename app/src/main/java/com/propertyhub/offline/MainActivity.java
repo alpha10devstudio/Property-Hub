@@ -109,7 +109,7 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         setContentView(R.layout.activity_main);
 
         storageManager = new StorageManager(this, settingsManager, new com.propertyhub.offline.util.DateTimeProvider());
-        posterRenderer = new PosterRenderer();
+        posterRenderer = new PosterRenderer(this);
         autoPosterManager = new AutoPosterManager(storageManager, posterRenderer, hostIoExecutor);
         bulkPosterManager = new BulkPosterManager(storageManager, posterRenderer);
         zipExportManager = new ZipExportManager(this, storageManager);

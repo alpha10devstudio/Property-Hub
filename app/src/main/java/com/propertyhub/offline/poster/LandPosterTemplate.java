@@ -1,5 +1,6 @@
 package com.propertyhub.offline.poster;
 
+import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -11,6 +12,7 @@ import android.graphics.Typeface;
 import android.text.TextPaint;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import com.propertyhub.offline.model.PropertyRecord;
 
@@ -20,11 +22,15 @@ public final class LandPosterTemplate {
     }
 
     public static boolean render(
+            @Nullable Context context,
             @NonNull Canvas canvas,
             @NonNull PropertyRecord record,
             int width,
             int height
     ) {
+        Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
+        Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
+
         Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         // 1. Clean Light Mint/Ivory Canvas Base (Asymmetric Editorial Split)
@@ -55,20 +61,21 @@ public final class LandPosterTemplate {
 
         TextPaint brandPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         brandPaint.setColor(Color.parseColor("#A7F3D0"));
-        brandPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        brandPaint.setTypeface(titleTypeface);
         brandPaint.setLetterSpacing(0.14f);
         brandPaint.setTextSize(22f);
         canvas.drawText("PROPERTY HUB", 168f, 102f, brandPaint);
 
         TextPaint tagPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         tagPaint.setColor(Color.parseColor("#D1FAE5"));
+        tagPaint.setTypeface(paragraphTypeface);
         tagPaint.setTextSize(18f);
         canvas.drawText("Collect • Generate • Share", 168f, 134f, tagPaint);
 
         // Main Headline stacked in sidebar
         TextPaint headlinePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         headlinePaint.setColor(Color.WHITE);
-        headlinePaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        headlinePaint.setTypeface(titleTypeface);
         headlinePaint.setTextSize(68f);
         canvas.drawText("LAND", 56f, 304f, headlinePaint);
         canvas.drawText("FOR SALE", 56f, 382f, headlinePaint);
@@ -79,7 +86,7 @@ public final class LandPosterTemplate {
 
         TextPaint subHeading = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         subHeading.setColor(Color.parseColor("#ECFDF5"));
-        subHeading.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        subHeading.setTypeface(titleTypeface);
         subHeading.setLetterSpacing(0.14f);
         subHeading.setTextSize(24f);
         canvas.drawText("LAND AVAILABLE", 56f, 466f, subHeading);
@@ -96,7 +103,7 @@ public final class LandPosterTemplate {
 
         TextPaint contactLabel = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         contactLabel.setColor(Color.parseColor("#6EE7B7"));
-        contactLabel.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        contactLabel.setTypeface(paragraphTypeface);
         contactLabel.setLetterSpacing(0.12f);
         contactLabel.setTextSize(21f);
         canvas.drawText("CONTACT OWNER", contactBox.left + 32f, contactBox.top + 56f, contactLabel);
@@ -104,18 +111,14 @@ public final class LandPosterTemplate {
         // Phone badge + Mobile Number (auto-fit if very long)
         TextPaint mobilePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mobilePaint.setColor(Color.WHITE);
-        mobilePaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
-        float mobileSize = 44f;
+        mobilePaint.setTypeface(paragraphTypeface);
         float maxMobileW = contactBox.width() - 64f;
-        mobilePaint.setTextSize(mobileSize);
-        while (mobilePaint.measureText(record.getMobile()) > maxMobileW && mobileSize > 24f) {
-            mobileSize -= 2f;
-            mobilePaint.setTextSize(mobileSize);
-        }
+        PosterTextFitter.fitSingleLineTextSize(record.getMobile(), mobilePaint, maxMobileW, 44f, 20f);
         canvas.drawText(record.getMobile(), contactBox.left + 32f, contactBox.top + 132f, mobilePaint);
 
         TextPaint recordMeta = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         recordMeta.setColor(Color.parseColor("#A7F3D0"));
+        recordMeta.setTypeface(paragraphTypeface);
         recordMeta.setTextSize(19f);
         canvas.drawText(record.getRecordId() + "  ·  " + record.getDate(),
                 contactBox.left + 32f, contactBox.bottom - 34f, recordMeta);
@@ -144,7 +147,7 @@ public final class LandPosterTemplate {
         // Panel Header
         TextPaint panelTitle = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         panelTitle.setColor(Color.parseColor("#065F46"));
-        panelTitle.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD));
+        panelTitle.setTypeface(titleTypeface);
         panelTitle.setTextSize(34f);
         canvas.drawText("LAND INFORMATION", panelRect.left + 58f, panelRect.top + 92f, panelTitle);
 
@@ -157,7 +160,7 @@ public final class LandPosterTemplate {
         // Complete Original Land Details
         TextPaint detailsPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         detailsPaint.setColor(Color.parseColor("#092E19"));
-        detailsPaint.setTypeface(Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL));
+        detailsPaint.setTypeface(paragraphTypeface);
 
         int boxLeft = (int) (panelRect.left + 58f);
         int boxTop = (int) (panelRect.top + 150f);

@@ -179,32 +179,90 @@ function parseTxtContent(
   return out;
 }
 
-function wrapLines(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number
-): string[] {
-  const paragraphs = text.replace(/\r\n/g, '\n').split('\n');
-  const lines: string[] = [];
-  for (const para of paragraphs) {
-    if (!para.trim()) {
-      lines.push('');
-      continue;
-    }
-    const words = para.split(/\s+/);
-    let current = '';
-    for (const word of words) {
-      const candidate = current ? `${current} ${word}` : word;
-      if (ctx.measureText(candidate).width <= maxWidth) {
-        current = candidate;
+function parseDetailsParagraphs(rawDetails: string): string[] {
+  if (!rawDetails.trim()) return ['-'];
+  const normalized = rawDetails.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const hasQuote = /["\u201C\u201D]/.test(normalized);
+  if (!hasQuote) {
+    const lines = normalized
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean);
+    return lines.length > 0 ? lines : ['-'];
+  }
+
+  const paragraphs: string[] = [];
+  let buf = '';
+  let inQuotes = false;
+  let expectedClose = '"';
+
+  const flushUnquoted = () => {
+    const t = buf.trim();
+    buf = '';
+    if (t) paragraphs.push(t);
+  };
+
+  for (let i = 0; i < normalized.length; i++) {
+    const ch = normalized[i];
+    if (!inQuotes) {
+      if (ch === '"' || ch === '\u201C') {
+        flushUnquoted();
+        inQuotes = true;
+        expectedClose = ch === '\u201C' ? '\u201D' : '"';
+      } else if (ch === ',' || ch === '\n') {
+        flushUnquoted();
+      } else if (!/\s/.test(ch) || buf.length > 0) {
+        buf += ch;
+      }
+    } else {
+      const next = i + 1 < normalized.length ? normalized[i + 1] : '';
+      if (ch === '\\' && (next === '"' || next === '\u201C' || next === '\u201D')) {
+        buf += next;
+        i++;
+      } else if (
+        expectedClose === '\u201D'
+          ? ch === '\u201D' || ch === '"'
+          : ch === '"' || ch === '\u201D'
+      ) {
+        const t = buf.trim();
+        buf = '';
+        if (t) paragraphs.push(t);
+        inQuotes = false;
       } else {
-        if (current) lines.push(current);
-        current = word;
+        buf += ch;
       }
     }
-    if (current) lines.push(current);
   }
-  return lines;
+  const rem = buf.trim();
+  if (rem) paragraphs.push(rem);
+  return paragraphs.length > 0 ? paragraphs : ['-'];
+}
+
+function wrapParagraphsWithGap(
+  ctx: CanvasRenderingContext2D,
+  paragraphs: string[],
+  maxWidth: number
+): string[][] {
+  return paragraphs.map((para) => {
+    const subLines = para.split('\n');
+    const wrapped: string[] = [];
+    for (const sub of subLines) {
+      const words = sub.trim().split(/\s+/).filter(Boolean);
+      if (words.length === 0) continue;
+      let current = '';
+      for (const word of words) {
+        const candidate = current ? `${current} ${word}` : word;
+        if (ctx.measureText(candidate).width <= maxWidth) {
+          current = candidate;
+        } else {
+          if (current) wrapped.push(current);
+          current = word;
+        }
+      }
+      if (current) wrapped.push(current);
+    }
+    return wrapped.length > 0 ? wrapped : ['-'];
+  });
 }
 
 function renderPosterDataUrl(record: PropertyRecord): string {
@@ -219,104 +277,247 @@ function renderPosterDataUrl(record: PropertyRecord): string {
   const isHouse = record.category === 'HOUSE_FOR_RENT';
 
   if (isHouse) {
-    // Deep architectural navy backdrop
-    const bgGrad = ctx.createLinearGradient(0, 0, width, height);
-    bgGrad.addColorStop(0, '#072259');
-    bgGrad.addColorStop(1, '#0F3D9E');
-    ctx.fillStyle = bgGrad;
+    const NAVY = '#032668';
+
+    // Pure white base & Navy Blue outer rounded border
+    ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle geometric roof grid accents
-    ctx.strokeStyle = 'rgba(147, 197, 253, 0.16)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = 7;
     ctx.beginPath();
-    ctx.moveTo(960, 0);
-    ctx.lineTo(width, 260);
-    ctx.moveTo(0, 820);
-    ctx.lineTo(360, height);
+    ctx.roundRect(16, 16, width - 32, height - 32, 48);
     ctx.stroke();
 
-    // Top Header Band
+    // Top roof silhouette + symmetric tapered wings
+    ctx.fillStyle = NAVY;
+    ctx.beginPath();
+    ctx.moveTo(96, 114);
+    ctx.lineTo(430, 106);
+    ctx.arc(430, 114, 8, -Math.PI / 2, Math.PI / 2);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(width - 96, 114);
+    ctx.lineTo(width - 430, 106);
+    ctx.arc(width - 430, 114, 8, -Math.PI / 2, Math.PI / 2, true);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(438, 150);
+    ctx.lineTo(618, 48);
+    ctx.lineTo(632, 56);
+    ctx.lineTo(466, 150);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(482, 150);
+    ctx.lineTo(720, 32);
+    ctx.lineTo(824, 84);
+    ctx.lineTo(824, 54);
+    ctx.lineTo(858, 54);
+    ctx.lineTo(858, 101);
+    ctx.lineTo(960, 150);
+    ctx.lineTo(890, 150);
+    ctx.lineTo(720, 64);
+    ctx.lineTo(548, 150);
+    ctx.closePath();
+    ctx.fill();
+
+    const cx = width / 2;
+    ctx.fillRect(cx - 22, 98, 18, 18);
+    ctx.fillRect(cx + 4, 98, 18, 18);
+    ctx.fillRect(cx - 22, 124, 18, 18);
+    ctx.fillRect(cx + 4, 124, 18, 18);
+
+    // Big Navy Title Banner
+    ctx.fillStyle = NAVY;
+    ctx.beginPath();
+    ctx.roundRect(36, 162, width - 72, 214, 52);
+    ctx.fill();
+
+    const titleText = 'ফ্ল্যাট / বাসা ভাড়া হবে';
+    let titleSize = 112;
+    ctx.font = `bold ${titleSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+    while (ctx.measureText(titleText).width > width - 160 && titleSize > 44) {
+      titleSize -= 2;
+      ctx.font = `bold ${titleSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+    }
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 64px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('HOUSE FOR RENT', 80, 126);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(titleText, width / 2, 269);
 
-    ctx.fillStyle = '#BFDBFE';
-    ctx.font = '600 26px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(`PROPERTY HUB  •  ${record.recordId}  •  ${record.date}`, 80, 174);
-
-    // House emblem right
-    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    // Middle White Details Card with Navy Border
+    ctx.fillStyle = '#FFFFFF';
+    ctx.beginPath();
+    ctx.roundRect(40, 408, width - 80, 402, 46);
+    ctx.fill();
+    ctx.strokeStyle = NAVY;
     ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(1235, 130);
-    ctx.lineTo(1295, 76);
-    ctx.lineTo(1355, 130);
     ctx.stroke();
-    ctx.strokeRect(1253, 130, 84, 54);
 
-    // Crisp elevated white card
+    // Left 2-story house + tree illustration
+    ctx.fillStyle = NAVY;
+    ctx.beginPath();
+    ctx.moveTo(64, 772);
+    ctx.quadraticCurveTo(208, 746, 354, 772);
+    ctx.quadraticCurveTo(208, 760, 64, 772);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillRect(94, 710, 12, 54);
+    ctx.beginPath();
+    ctx.arc(100, 678, 30, 0, Math.PI * 2);
+    ctx.arc(84, 696, 20, 0, Math.PI * 2);
+    ctx.arc(116, 696, 20, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(140, 522, 72, 236);
+    ctx.beginPath();
+    ctx.moveTo(212, 506);
+    ctx.lineTo(212, 758);
+    ctx.moveTo(334, 506);
+    ctx.lineTo(334, 758);
+    ctx.moveTo(130, 610);
+    ctx.lineTo(344, 610);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(192, 514);
+    ctx.lineTo(274, 454);
+    ctx.lineTo(312, 478);
+    ctx.lineTo(312, 458);
+    ctx.lineTo(330, 458);
+    ctx.lineTo(330, 488);
+    ctx.lineTo(356, 514);
+    ctx.lineTo(340, 526);
+    ctx.lineTo(274, 472);
+    ctx.lineTo(206, 526);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillRect(251, 510, 20, 20);
+    ctx.fillRect(277, 510, 20, 20);
+    ctx.fillRect(251, 536, 20, 20);
+    ctx.fillRect(277, 536, 20, 20);
+    ctx.lineWidth = 4;
+    ctx.strokeRect(154, 540, 48, 54);
+    ctx.strokeRect(154, 630, 44, 48);
+    ctx.fillRect(254, 630, 62, 128);
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.roundRect(72, 224, width - 144, 624, 34);
+    ctx.arc(276, 696, 3.2, 0, Math.PI * 2);
+    ctx.arc(294, 696, 3.2, 0, Math.PI * 2);
     ctx.fill();
 
-    // Blue left accent bar
-    ctx.fillStyle = '#1D4ED8';
+    // Vertical divider
+    ctx.strokeStyle = NAVY;
+    ctx.lineWidth = 5;
     ctx.beginPath();
-    ctx.roundRect(72, 264, 14, 544, 7);
-    ctx.fill();
-
-    ctx.fillStyle = '#0B3A96';
-    ctx.font = 'bold 28px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('PROPERTY DETAILS', 124, 294);
-
-    ctx.strokeStyle = '#E2E8F0';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(124, 316);
-    ctx.lineTo(width - 124, 316);
+    ctx.moveTo(374, 446);
+    ctx.lineTo(374, 772);
     ctx.stroke();
 
-    // Dynamic text fit
-    let fontSize = 38;
-    let fittedLines: string[] = [];
+    // Right Dynamic Details Paragraphs
+    const paragraphs = parseDetailsParagraphs(record.details);
+    const boxLeft = 408;
+    const boxTop = 434;
+    const boxWidth = width - 72 - boxLeft;
+    const boxHeight = 350;
+
+    let fontSize = 62;
+    let wrappedGroups: string[][] = [];
+    let lineH = fontSize * 1.18;
+    let paraGap = Math.max(12, fontSize * 0.42);
+    let totalH = 0;
+
     while (fontSize >= 18) {
-      ctx.font = `500 ${fontSize}px "Plus Jakarta Sans", sans-serif`;
-      fittedLines = wrapLines(ctx, record.details, width - 260);
-      if (fittedLines.length * (fontSize * 1.42) <= 465) break;
+      ctx.font = `600 ${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+      wrappedGroups = wrapParagraphsWithGap(ctx, paragraphs, boxWidth);
+      lineH = fontSize * 1.18;
+      paraGap = Math.max(10, fontSize * 0.42);
+      totalH =
+        wrappedGroups.reduce((acc, g) => acc + g.length * lineH, 0) +
+        Math.max(0, wrappedGroups.length - 1) * paraGap;
+      if (totalH <= boxHeight) break;
       fontSize -= 2;
     }
 
-    ctx.fillStyle = '#0F172A';
-    ctx.font = `500 ${fontSize}px "Plus Jakarta Sans", sans-serif`;
-    const lineHeight = fontSize * 1.42;
-    let y = 376;
-    for (const line of fittedLines) {
-      if (y > 815) break;
-      ctx.fillText(line, 124, y);
-      y += lineHeight;
+    ctx.fillStyle = NAVY;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    let drawY = boxTop + Math.max(0, (boxHeight - totalH) / 2);
+    for (let gi = 0; gi < wrappedGroups.length; gi++) {
+      for (const line of wrappedGroups[gi]) {
+        if (drawY + lineH > boxTop + boxHeight + 10) break;
+        ctx.fillText(line, boxLeft, drawY);
+        drawY += lineH;
+      }
+      if (gi < wrappedGroups.length - 1) drawY += paraGap;
     }
 
-    // Bottom Call CTA Bar
-    ctx.fillStyle = '#1D4ED8';
+    // Bottom Navy Contact Banner
+    ctx.fillStyle = NAVY;
     ctx.beginPath();
-    ctx.roundRect(72, 892, width - 144, 124, 28);
+    ctx.roundRect(36, 842, width - 72, 200, 52);
     ctx.fill();
 
-    ctx.fillStyle = '#DBEAFE';
-    ctx.font = 'bold 24px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText('CONTACT / INQUIRY', 120, 942);
-
     ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 48px "Plus Jakarta Sans", sans-serif';
-    ctx.fillText(record.mobile, 120, 994);
+    ctx.beginPath();
+    ctx.arc(144, 942, 64, 0, Math.PI * 2);
+    ctx.fill();
 
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    ctx.font = '600 22px "Plus Jakarta Sans", sans-serif';
-    ctx.textAlign = 'right';
-    ctx.fillText('Property Hub • Offline Verified', width - 116, 965);
+    // Tilted Navy Handset inside white circle
+    ctx.save();
+    ctx.translate(144, 942);
+    ctx.fillStyle = NAVY;
+    ctx.beginPath();
+    ctx.moveTo(-22, -34);
+    ctx.quadraticCurveTo(-34, -32, -34, -18);
+    ctx.bezierCurveTo(-34, 6, -6, 34, 18, 34);
+    ctx.quadraticCurveTo(32, 34, 34, 22);
+    ctx.lineTo(34, 12);
+    ctx.quadraticCurveTo(34, 6, 26, 4);
+    ctx.lineTo(14, 2);
+    ctx.quadraticCurveTo(9, 1, 6, 5);
+    ctx.lineTo(1, 11);
+    ctx.quadraticCurveTo(-8, 6, -11, -1);
+    ctx.lineTo(-5, -6);
+    ctx.quadraticCurveTo(-1, -9, -2, -14);
+    ctx.lineTo(-4, -26);
+    ctx.quadraticCurveTo(-6, -34, -12, -34);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(242, 872);
+    ctx.lineTo(242, 1012);
+    ctx.stroke();
+
+    const contactStr = `যোগাযোগ: ${record.mobile}`;
+    let mobSize = 86;
+    const mobAreaLeft = 272;
+    const mobAreaW = width - 76 - mobAreaLeft;
+    ctx.font = `bold ${mobSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+    while (ctx.measureText(contactStr).width > mobAreaW && mobSize > 22) {
+      mobSize -= 2;
+      ctx.font = `bold ${mobSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+    }
+    ctx.fillStyle = '#FFFFFF';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(contactStr, mobAreaLeft + mobAreaW / 2, 942);
     ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
   } else {
     // LAND FOR SALE: Distinct Forest & Emerald Asymmetric Editorial Layout
     ctx.fillStyle = '#F3FAF5';
@@ -385,23 +586,33 @@ function renderPosterDataUrl(record: PropertyRecord): string {
     ctx.fillStyle = '#10B981';
     ctx.fillRect(550, 174, 140, 6);
 
+    const landParagraphs = parseDetailsParagraphs(record.details);
     let fontSize = 38;
-    let fittedLines: string[] = [];
+    let fittedGroups: string[][] = [];
+    let lineHeight = fontSize * 1.32;
+    let paraGap = Math.max(10, fontSize * 0.4);
     while (fontSize >= 18) {
-      ctx.font = `500 ${fontSize}px "Plus Jakarta Sans", sans-serif`;
-      fittedLines = wrapLines(ctx, record.details, width - 680);
-      if (fittedLines.length * (fontSize * 1.44) <= 710) break;
+      ctx.font = `500 ${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+      fittedGroups = wrapParagraphsWithGap(ctx, landParagraphs, width - 680);
+      lineHeight = fontSize * 1.32;
+      paraGap = Math.max(10, fontSize * 0.4);
+      const totalH =
+        fittedGroups.reduce((acc, g) => acc + g.length * lineHeight, 0) +
+        Math.max(0, fittedGroups.length - 1) * paraGap;
+      if (totalH <= 710) break;
       fontSize -= 2;
     }
 
     ctx.fillStyle = '#0F172A';
-    ctx.font = `500 ${fontSize}px "Plus Jakarta Sans", sans-serif`;
-    const lineHeight = fontSize * 1.44;
+    ctx.font = `500 ${fontSize}px "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
     let y = 246;
-    for (const line of fittedLines) {
-      if (y > height - 125) break;
-      ctx.fillText(line, 550, y);
-      y += lineHeight;
+    for (let gi = 0; gi < fittedGroups.length; gi++) {
+      for (const line of fittedGroups[gi]) {
+        if (y > height - 125) break;
+        ctx.fillText(line, 550, y);
+        y += lineHeight;
+      }
+      if (gi < fittedGroups.length - 1) y += paraGap;
     }
   }
 
