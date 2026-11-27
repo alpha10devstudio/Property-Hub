@@ -53,7 +53,7 @@ import {
   removeRecordFromTxt,
   ZipArchiveEntry,
 } from './propertyCatalog';
-import { RichFieldInput } from './RichFieldInput';
+import { buildWholeFieldSegments, RichFieldInput } from './RichFieldInput';
 
 type ActiveScreen = 'collect' | 'settings' | 'files';
 type FilesSubTab = 'records' | 'bulk' | 'posters' | 'zip';
@@ -94,16 +94,22 @@ function getLocalTimeStr(date = new Date()): string {
 function createInitialFormMap(
   category: CategoryCode,
   customFields: PropertyFieldConfig[] = [],
-  defaultOverrides: Record<string, string> = {}
+  defaultOverrides: Record<string, string> = {},
+  stickyStyles: Record<string, { bold: boolean; italic: boolean }> = {}
 ): Record<string, PropertyFieldValue> {
   const map: Record<string, PropertyFieldValue> = {};
   for (const cfg of getFieldsForCategory(category, customFields, defaultOverrides)) {
     const def = cfg.defaultValue;
+    const sticky = cfg.formattable ? stickyStyles[`${category}|${cfg.fieldId}`] : undefined;
     map[cfg.fieldId] = {
       fieldId: cfg.fieldId,
       label: cfg.label,
       plainText: def,
-      segments: def ? [{ text: def, bold: false, italic: false }] : [],
+      segments: cfg.formattable
+        ? buildWholeFieldSegments(def, Boolean(sticky?.bold), Boolean(sticky?.italic))
+        : def
+          ? [{ text: def, bold: false, italic: false }]
+          : [],
     };
   }
   return map;
@@ -346,11 +352,16 @@ export default function App() {
         nextState.customFields[cat] ?? [],
         nextOverrides
       ).find((f) => f.fieldId === fieldId);
+      const sticky = cfg?.formattable ? stickyFieldStyles[`${cat}|${fieldId}`] : undefined;
       const nextFieldValue: PropertyFieldValue = {
         fieldId,
         label: cfg?.label ?? fieldId,
         plainText: value,
-        segments: value ? [{ text: value, bold: false, italic: false }] : [],
+        segments: cfg?.formattable
+          ? buildWholeFieldSegments(value, Boolean(sticky?.bold), Boolean(sticky?.italic))
+          : value
+            ? [{ text: value, bold: false, italic: false }]
+            : [],
       };
       if (isHouse) {
         setHouseForm((prev) => ({ ...prev, [fieldId]: nextFieldValue }));
@@ -390,11 +401,16 @@ export default function App() {
         nextOverrides
       ).find((f) => f.fieldId === fieldId);
       const restoredDefault = cfg?.defaultValue ?? '';
+      const sticky = cfg?.formattable ? stickyFieldStyles[`${cat}|${fieldId}`] : undefined;
       const nextFieldValue: PropertyFieldValue = {
         fieldId,
         label: cfg?.label ?? fieldId,
         plainText: restoredDefault,
-        segments: restoredDefault ? [{ text: restoredDefault, bold: false, italic: false }] : [],
+        segments: cfg?.formattable
+          ? buildWholeFieldSegments(restoredDefault, Boolean(sticky?.bold), Boolean(sticky?.italic))
+          : restoredDefault
+            ? [{ text: restoredDefault, bold: false, italic: false }]
+            : [],
       };
       if (isHouse) {
         setHouseForm((prev) => ({ ...prev, [fieldId]: nextFieldValue }));
@@ -465,13 +481,18 @@ export default function App() {
     setDefaultDrafts((prev) => ({ ...prev, [added.fieldId]: added.defaultValue }));
 
     // Add ONLY the newly created field (with its default value) to the active draft form without touching existing fields
+    const sticky = added.formattable
+      ? stickyFieldStyles[`${manageCat}|${added.fieldId}`]
+      : undefined;
     const newFieldValue: PropertyFieldValue = {
       fieldId: added.fieldId,
       label: added.label,
       plainText: added.defaultValue,
-      segments: added.defaultValue
-        ? [{ text: added.defaultValue, bold: false, italic: false }]
-        : [],
+      segments: added.formattable
+        ? buildWholeFieldSegments(added.defaultValue, Boolean(sticky?.bold), Boolean(sticky?.italic))
+        : added.defaultValue
+          ? [{ text: added.defaultValue, bold: false, italic: false }]
+          : [],
     };
     if (manageCat === 'HOUSE_FOR_RENT') {
       setHouseForm((prev) => ({ ...prev, [added.fieldId]: prev[added.fieldId] ?? newFieldValue }));
@@ -544,15 +565,26 @@ export default function App() {
     else setLandErrors({});
     setSubmittingCategory(category);
 
-    const fieldValues = configs.map(
-      (cfg) =>
-        currentForm[cfg.fieldId] ?? {
-          fieldId: cfg.fieldId,
-          label: cfg.label,
-          plainText: '',
-          segments: [],
-        }
-    );
+    const fieldValues = configs.map((cfg) => {
+      const raw = currentForm[cfg.fieldId] ?? {
+        fieldId: cfg.fieldId,
+        label: cfg.label,
+        plainText: '',
+        segments: [],
+      };
+      if (!cfg.formattable) {
+        return raw;
+      }
+      const sticky = stickyFieldStyles[`${category}|${cfg.fieldId}`];
+      return {
+        ...raw,
+        segments: buildWholeFieldSegments(
+          raw.plainText,
+          Boolean(sticky?.bold),
+          Boolean(sticky?.italic)
+        ),
+      };
+    });
     const titleVal =
       (currentForm.title?.plainText ?? '').trim() || getDefaultTitle(category, catOverrides);
     const mobileVal = (currentForm.mobile?.plainText ?? '').trim();
@@ -578,13 +610,13 @@ export default function App() {
     const existingTxt = isHouse ? state.houseFiles[fileName] ?? '' : state.landFiles[fileName] ?? '';
     const updatedTxt = appendRecord(existingTxt, newRecord);
 
-    // Clear form to effective defaults right after TXT save succeeds (matches Android TXT-first pipeline)
+    // Clear form to effective defaults right after TXT save succeeds while keeping sticky whole-field B/I styles
     if (isHouse) {
-      setHouseForm(createInitialFormMap('HOUSE_FOR_RENT', catCustom, catOverrides));
+      setHouseForm(createInitialFormMap('HOUSE_FOR_RENT', catCustom, catOverrides, stickyFieldStyles));
       setHouseDirtyFields({});
       setHouseResetToken((n) => n + 1);
     } else {
-      setLandForm(createInitialFormMap('LAND_FOR_SALE', catCustom, catOverrides));
+      setLandForm(createInitialFormMap('LAND_FOR_SALE', catCustom, catOverrides, stickyFieldStyles));
       setLandDirtyFields({});
       setLandResetToken((n) => n + 1);
     }
@@ -1203,6 +1235,26 @@ export default function App() {
                                     ...prev,
                                     [stickyKey]: { bold, italic },
                                   }));
+                                  const applyStyleToForm = (
+                                    prev: Record<string, PropertyFieldValue>
+                                  ): Record<string, PropertyFieldValue> => {
+                                    const existing = prev[cfg.fieldId];
+                                    if (!existing) return prev;
+                                    return {
+                                      ...prev,
+                                      [cfg.fieldId]: {
+                                        ...existing,
+                                        segments: cfg.formattable
+                                          ? buildWholeFieldSegments(existing.plainText, bold, italic)
+                                          : existing.segments,
+                                      },
+                                    };
+                                  };
+                                  if (activeCategory === 'HOUSE_FOR_RENT') {
+                                    setHouseForm(applyStyleToForm);
+                                  } else {
+                                    setLandForm(applyStyleToForm);
+                                  }
                                 }}
                                 error={currentErrors[cfg.fieldId]}
                                 inputSurfaceClass={inputSurface}

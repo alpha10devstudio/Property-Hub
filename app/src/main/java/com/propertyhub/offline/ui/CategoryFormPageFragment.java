@@ -388,11 +388,7 @@ public class CategoryFormPageFragment extends Fragment {
             boolean isUserEdited = userEditedFieldIds.contains(cfg.getFieldId());
             PropertyFieldValue restored = restoredMap.get(cfg.getFieldId());
             if (isUserEdited && restored != null) {
-                if (cfg.supportsFormatting()) {
-                    editText.setText(RichTextSpannableCodec.toSpannable(restored.getSegments()));
-                } else {
-                    editText.setText(restored.getPlainText());
-                }
+                editText.setText(restored.getPlainText());
             } else {
                 editText.setText(cfg.getDefaultValue());
             }
@@ -405,6 +401,7 @@ public class CategoryFormPageFragment extends Fragment {
                 applyFormatToggleVisual(btnItalic, false, activeAccent);
 
                 controller = RichTextSpannableCodec.attach(editText, state -> {
+                    pendingStyleByField.put(currentFieldId, new boolean[]{state.bold, state.italic});
                     applyFormatToggleVisual(btnBold, state.bold, activeAccent);
                     applyFormatToggleVisual(btnItalic, state.italic, activeAccent);
                 });
@@ -414,6 +411,22 @@ public class CategoryFormPageFragment extends Fragment {
                 boolean[] savedPending = pendingStyleByField.get(currentFieldId);
                 if (savedPending != null && savedPending.length == 2) {
                     controller.setPendingState(savedPending[0], savedPending[1]);
+                } else if (isUserEdited && restored != null) {
+                    boolean hasBold = false;
+                    boolean hasItalic = false;
+                    for (StyledSegment seg : restored.getSegments()) {
+                        if (seg != null) {
+                            if (seg.isBold()) {
+                                hasBold = true;
+                            }
+                            if (seg.isItalic()) {
+                                hasItalic = true;
+                            }
+                        }
+                    }
+                    if (hasBold || hasItalic) {
+                        controller.setPendingState(hasBold, hasItalic);
+                    }
                 }
             } else {
                 formatControls.setVisibility(View.GONE);
@@ -551,8 +564,8 @@ public class CategoryFormPageFragment extends Fragment {
         for (FieldBinding binding : fieldBindings) {
             PropertyFieldConfig cfg = binding.config;
             String rawText = textOf(binding.editText);
-            if (cfg.supportsFormatting()) {
-                List<StyledSegment> segs = RichTextSpannableCodec.fromSpanned(binding.editText.getText());
+            if (cfg.supportsFormatting() && binding.richController != null) {
+                List<StyledSegment> segs = binding.richController.extractWholeFieldSegments(rawText);
                 out.add(new PropertyFieldValue(cfg.getFieldId(), cfg.getLabel(), rawText, segs));
             } else {
                 out.add(new PropertyFieldValue(cfg.getFieldId(), cfg.getLabel(), rawText));

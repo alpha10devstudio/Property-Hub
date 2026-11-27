@@ -2,13 +2,11 @@ package com.propertyhub.offline.ui;
 
 import android.graphics.Typeface;
 import android.text.Editable;
-import android.text.Selection;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextWatcher;
 import android.text.style.StyleSpan;
-import android.view.MotionEvent;
 import android.view.View;
 import android.widget.EditText;
 
@@ -111,8 +109,24 @@ public final class RichTextSpannableCodec {
     }
 
     /**
-     * Attaches cursor-typing Bold/Italic support and selection-aware toolbar callbacks
-     * for an EditText without disturbing IME composition.
+     * Converts whole-field plain text + bold/italic flags into a single {@link StyledSegment} list.
+     */
+    @NonNull
+    public static List<StyledSegment> buildWholeFieldSegments(
+            @Nullable String plainText,
+            boolean bold,
+            boolean italic
+    ) {
+        if (plainText == null || plainText.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return Collections.singletonList(new StyledSegment(plainText, bold, italic));
+    }
+
+    /**
+     * Attaches whole-field sticky Bold/Italic support and toolbar callbacks for an EditText.
+     * Whenever Bold or Italic is enabled, 100% of the field (defaults, existing text, and newly typed
+     * or IME-composed text) renders and exports in that style until manually turned off.
      */
     @NonNull
     public static Controller attach(
@@ -125,47 +139,38 @@ public final class RichTextSpannableCodec {
     public static final class Controller {
         private final EditText editText;
         private final StyleStateListener listener;
+        private final Typeface baseTypeface;
         @Nullable
-        private Runnable onUserContentOrStyleEdited;
+        private Runnable onUserTextEdited;
         private boolean pendingBold = false;
         private boolean pendingItalic = false;
         private boolean internalChange = false;
-        private int touchedSelStart = -1;
-        private int touchedSelEnd = -1;
+        private int lastAppliedTypefaceStyle = -1;
 
         Controller(@NonNull EditText editText, @NonNull StyleStateListener listener) {
             this.editText = editText;
             this.listener = listener;
+            Typeface current = editText.getTypeface();
+            this.baseTypeface = current != null
+                    ? Typeface.create(current, Typeface.NORMAL)
+                    : Typeface.DEFAULT;
             installWatcher();
+            applyWholeFieldVisuals();
         }
 
         public void setOnUserContentOrStyleEdited(@Nullable Runnable callback) {
-            this.onUserContentOrStyleEdited = callback;
+            this.onUserTextEdited = callback;
         }
 
         public void bindFormatButtons(@NonNull View btnBold, @NonNull View btnItalic) {
-            View.OnTouchListener snapshotTouch = (v, event) -> {
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
-                    snapshotSelection();
-                }
-                return false;
-            };
-            btnBold.setOnTouchListener(snapshotTouch);
-            btnItalic.setOnTouchListener(snapshotTouch);
+            btnBold.setOnTouchListener(null);
+            btnItalic.setOnTouchListener(null);
             btnBold.setOnClickListener(v -> toggleBold());
             btnItalic.setOnClickListener(v -> toggleItalic());
         }
 
         public void snapshotSelection() {
-            int s = editText.getSelectionStart();
-            int e = editText.getSelectionEnd();
-            if (s >= 0 && e >= 0 && s != e) {
-                touchedSelStart = Math.min(s, e);
-                touchedSelEnd = Math.max(s, e);
-            } else {
-                touchedSelStart = -1;
-                touchedSelEnd = -1;
-            }
+            // Selection snapshots are no longer needed in whole-field mode.
         }
 
         public void toggleBold() {
@@ -184,338 +189,102 @@ public final class RichTextSpannableCodec {
         public void setPendingState(boolean bold, boolean italic) {
             this.pendingBold = bold;
             this.pendingItalic = italic;
-            syncFromCursor();
+            applyWholeFieldVisuals();
+            listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
+        }
+
+        @NonNull
+        public List<StyledSegment> extractWholeFieldSegments(@Nullable String plainText) {
+            return buildWholeFieldSegments(plainText, pendingBold, pendingItalic);
         }
 
         /**
-         * Updates toolbar state when selection changes WITHOUT auto-disabling the user's
-         * sticky manual Bold/Italic typing toggles.
+         * Syncs toolbar toggle state without auto-disabling sticky whole-field Bold/Italic.
          */
         public void syncFromCursor() {
-            Editable text = editText.getText();
-            if (text == null) {
-                listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
-                return;
-            }
-            int selStart = Math.max(0, editText.getSelectionStart());
-            int selEnd = Math.max(0, editText.getSelectionEnd());
-            if (selStart != selEnd) {
-                StyleState rangeState = inspectRange(text, Math.min(selStart, selEnd), Math.max(selStart, selEnd));
-                listener.onStyleStateChanged(rangeState);
-                return;
-            }
-            // Collapsed cursor: preserve sticky manual pendingBold / pendingItalic until user turns them off
+            applyWholeFieldVisuals();
             listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
         }
 
         public void resetPending() {
             pendingBold = false;
             pendingItalic = false;
-            touchedSelStart = -1;
-            touchedSelEnd = -1;
+            applyWholeFieldVisuals();
             listener.onStyleStateChanged(new StyleState(false, false));
         }
 
         private void toggleStyle(int targetStyle) {
-            Editable text = editText.getText();
-            if (text == null) {
-                return;
+            if (targetStyle == Typeface.BOLD) {
+                pendingBold = !pendingBold;
+            } else {
+                pendingItalic = !pendingItalic;
             }
-            int selStart = Math.max(0, editText.getSelectionStart());
-            int selEnd = Math.max(0, editText.getSelectionEnd());
-            int start = Math.min(selStart, selEnd);
-            int end = Math.max(selStart, selEnd);
-
-            // Rescue selection if Android ActionMode/touch transition collapsed it right before onClick
-            if (start == end
-                    && touchedSelStart >= 0
-                    && touchedSelEnd > touchedSelStart
-                    && touchedSelEnd <= text.length()) {
-                start = touchedSelStart;
-                end = touchedSelEnd;
-            }
-            touchedSelStart = -1;
-            touchedSelEnd = -1;
-
-            if (start == end) {
-                if (targetStyle == Typeface.BOLD) {
-                    pendingBold = !pendingBold;
-                } else {
-                    pendingItalic = !pendingItalic;
-                }
-                listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
-                return;
-            }
-
-            boolean applyBold = targetStyle == Typeface.BOLD;
-            StyleState currentRange = inspectRange(text, start, end);
-            boolean enableTarget = applyBold ? !currentRange.bold : !currentRange.italic;
-
-            internalChange = true;
-            try {
-                updateRangeStyle(text, start, end, applyBold, enableTarget);
-                if (editText.hasFocus() || editText.requestFocus()) {
-                    editText.setSelection(start, end);
-                }
-                editText.invalidate();
-            } finally {
-                internalChange = false;
-            }
-
-            if (onUserContentOrStyleEdited != null) {
-                onUserContentOrStyleEdited.run();
-            }
-
-            StyleState updated = inspectRange(text, start, end);
-            listener.onStyleStateChanged(updated);
+            applyWholeFieldVisuals();
+            editText.invalidate();
+            listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
         }
 
-        private void installWatcher() {
-            editText.addTextChangedListener(new TextWatcher() {
-                private String oldReplacedSlice = "";
-                private boolean[] oldBoldFlags = new boolean[0];
-                private boolean[] oldItalicFlags = new boolean[0];
-                private int changeStart = 0;
-                private int newCount = 0;
-
-                @Override
-                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-                    if (internalChange || s == null) {
-                        oldReplacedSlice = "";
-                        oldBoldFlags = new boolean[0];
-                        oldItalicFlags = new boolean[0];
-                        return;
-                    }
-                    int safeStart = Math.max(0, Math.min(start, s.length()));
-                    int safeEnd = Math.max(safeStart, Math.min(safeStart + count, s.length()));
-                    oldReplacedSlice = s.subSequence(safeStart, safeEnd).toString();
-                    int oldLen = safeEnd - safeStart;
-                    oldBoldFlags = new boolean[oldLen];
-                    oldItalicFlags = new boolean[oldLen];
-                    if (oldLen > 0 && s instanceof Spanned) {
-                        Spanned spanned = (Spanned) s;
-                        for (int i = 0; i < oldLen; i++) {
-                            StyleState st = inspectChar(spanned, safeStart + i);
-                            oldBoldFlags[i] = st.bold;
-                            oldItalicFlags[i] = st.italic;
-                        }
-                    }
-                }
-
-                @Override
-                public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    changeStart = Math.max(0, start);
-                    newCount = Math.max(0, count);
-                }
-
-                @Override
-                public void afterTextChanged(Editable s) {
-                    if (internalChange || s == null) {
-                        return;
-                    }
-                    if (onUserContentOrStyleEdited != null) {
-                        onUserContentOrStyleEdited.run();
-                    }
-                    if (newCount <= 0) {
-                        return;
-                    }
-                    int safeEnd = Math.min(s.length(), changeStart + newCount);
-                    if (safeEnd <= changeStart) {
-                        return;
-                    }
-
-                    // Preserve exact prior Bold/Italic spans on prefix/suffix wiped by IME composing replacement,
-                    // while applying current sticky (pendingBold, pendingItalic) to newly inserted characters.
-                    String newSlice = s.subSequence(changeStart, safeEnd).toString();
-                    int oldLen = oldReplacedSlice.length();
-                    int newLen = newSlice.length();
-
-                    int selEnd = Selection.getSelectionEnd(s);
-                    int maxSuffix = newLen;
-                    if (selEnd >= changeStart && selEnd <= safeEnd) {
-                        maxSuffix = Math.max(0, safeEnd - selEnd);
-                    }
-
-                    int suffix = 0;
-                    while (suffix < maxSuffix
-                            && suffix < oldLen
-                            && suffix < newLen
-                            && oldReplacedSlice.charAt(oldLen - 1 - suffix)
-                            == newSlice.charAt(newLen - 1 - suffix)) {
-                        suffix++;
-                    }
-
-                    int maxPrefixLimit = Math.min(oldLen - suffix, newLen - suffix);
-                    int prefix = 0;
-                    while (prefix < maxPrefixLimit
-                            && oldReplacedSlice.charAt(prefix) == newSlice.charAt(prefix)) {
-                        prefix++;
-                    }
-
-                    boolean[] targetBold = new boolean[newLen];
-                    boolean[] targetItalic = new boolean[newLen];
-                    for (int i = 0; i < prefix; i++) {
-                        targetBold[i] = oldBoldFlags[i];
-                        targetItalic[i] = oldItalicFlags[i];
-                    }
-                    int insertedEnd = newLen - suffix;
-                    for (int i = prefix; i < insertedEnd; i++) {
-                        targetBold[i] = pendingBold;
-                        targetItalic[i] = pendingItalic;
-                    }
-                    for (int j = 0; j < suffix; j++) {
-                        int newIdx = insertedEnd + j;
-                        int oldIdx = oldLen - suffix + j;
-                        targetBold[newIdx] = oldBoldFlags[oldIdx];
-                        targetItalic[newIdx] = oldItalicFlags[oldIdx];
-                    }
-
+        private void applyWholeFieldVisuals() {
+            Editable text = editText.getText();
+            boolean hasText = text != null && text.length() > 0;
+            if (hasText) {
+                StyleSpan[] spans = text.getSpans(0, text.length(), StyleSpan.class);
+                if (spans != null && spans.length > 0) {
                     internalChange = true;
                     try {
-                        stripOrSplitSpansInRange(s, changeStart, safeEnd);
-                        int runStart = 0;
-                        for (int i = 1; i <= newLen; i++) {
-                            boolean endRun = (i == newLen)
-                                    || (targetBold[i] != targetBold[runStart])
-                                    || (targetItalic[i] != targetItalic[runStart]);
-                            if (endRun) {
-                                applyFlags(
-                                        s,
-                                        changeStart + runStart,
-                                        changeStart + i,
-                                        targetBold[runStart],
-                                        targetItalic[runStart]
-                                );
-                                runStart = i;
-                            }
+                        for (StyleSpan span : spans) {
+                            text.removeSpan(span);
                         }
                     } finally {
                         internalChange = false;
                     }
                 }
+            }
+
+            int targetStyle = Typeface.NORMAL;
+            if (hasText) {
+                if (pendingBold && pendingItalic) {
+                    targetStyle = Typeface.BOLD_ITALIC;
+                } else if (pendingBold) {
+                    targetStyle = Typeface.BOLD;
+                } else if (pendingItalic) {
+                    targetStyle = Typeface.ITALIC;
+                }
+            }
+
+            if (targetStyle != lastAppliedTypefaceStyle) {
+                editText.setTypeface(baseTypeface, targetStyle);
+                lastAppliedTypefaceStyle = targetStyle;
+            }
+        }
+
+        private void installWatcher() {
+            editText.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                }
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                }
+
+                @Override
+                public void afterTextChanged(Editable s) {
+                    if (internalChange) {
+                        return;
+                    }
+                    applyWholeFieldVisuals();
+                    if (onUserTextEdited != null) {
+                        onUserTextEdited.run();
+                    }
+                }
             });
 
-            editText.setOnClickListener(v -> syncFromCursor());
             editText.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
                     syncFromCursor();
                 }
             });
-            editText.setAccessibilityDelegate(new View.AccessibilityDelegate() {
-                @Override
-                public void sendAccessibilityEvent(@NonNull View host, int eventType) {
-                    super.sendAccessibilityEvent(host, eventType);
-                    if (eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
-                        syncFromCursor();
-                    }
-                }
-            });
-        }
-    }
-
-    @NonNull
-    private static StyleState inspectChar(@NonNull Spanned spanned, int index) {
-        if (index < 0 || index >= spanned.length()) {
-            return new StyleState(false, false);
-        }
-        StyleSpan[] spans = spanned.getSpans(index, index + 1, StyleSpan.class);
-        boolean b = false;
-        boolean it = false;
-        if (spans != null) {
-            for (StyleSpan span : spans) {
-                int s = spanned.getSpanStart(span);
-                int e = spanned.getSpanEnd(span);
-                if (s <= index && e > index) {
-                    if ((span.getStyle() & Typeface.BOLD) != 0) {
-                        b = true;
-                    }
-                    if ((span.getStyle() & Typeface.ITALIC) != 0) {
-                        it = true;
-                    }
-                }
-            }
-        }
-        return new StyleState(b, it);
-    }
-
-    @NonNull
-    private static StyleState inspectRange(@NonNull Spanned spanned, int start, int end) {
-        if (end <= start) {
-            return new StyleState(false, false);
-        }
-        boolean allBold = true;
-        boolean allItalic = true;
-        for (int i = start; i < end; i++) {
-            StyleState st = inspectChar(spanned, i);
-            if (!st.bold) {
-                allBold = false;
-            }
-            if (!st.italic) {
-                allItalic = false;
-            }
-            if (!allBold && !allItalic) {
-                break;
-            }
-        }
-        return new StyleState(allBold, allItalic);
-    }
-
-    private static void updateRangeStyle(
-            @NonNull Editable editable,
-            int start,
-            int end,
-            boolean modifyBold,
-            boolean enableTarget
-    ) {
-        int len = end - start;
-        if (len <= 0) {
-            return;
-        }
-        boolean[] boldFlags = new boolean[len];
-        boolean[] italicFlags = new boolean[len];
-        for (int i = 0; i < len; i++) {
-            StyleState existing = inspectChar(editable, start + i);
-            boldFlags[i] = modifyBold ? enableTarget : existing.bold;
-            italicFlags[i] = modifyBold ? existing.italic : enableTarget;
-        }
-
-        stripOrSplitSpansInRange(editable, start, end);
-
-        int runStart = 0;
-        for (int i = 1; i <= len; i++) {
-            boolean endRun = (i == len)
-                    || (boldFlags[i] != boldFlags[runStart])
-                    || (italicFlags[i] != italicFlags[runStart]);
-            if (endRun) {
-                applyFlags(editable, start + runStart, start + i, boldFlags[runStart], italicFlags[runStart]);
-                runStart = i;
-            }
-        }
-    }
-
-    private static void stripOrSplitSpansInRange(
-            @NonNull Editable editable,
-            int start,
-            int end
-    ) {
-        StyleSpan[] overlapping = editable.getSpans(start, end, StyleSpan.class);
-        if (overlapping == null) {
-            return;
-        }
-        for (StyleSpan span : overlapping) {
-            int s = editable.getSpanStart(span);
-            int e = editable.getSpanEnd(span);
-            int style = span.getStyle();
-            if (s < 0 || e <= s || e <= start || s >= end) {
-                continue;
-            }
-            editable.removeSpan(span);
-            if (s < start) {
-                editable.setSpan(new StyleSpan(style), s, start, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
-            if (e > end) {
-                editable.setSpan(new StyleSpan(style), end, e, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
         }
     }
 
