@@ -132,4 +132,50 @@ public class PropertyFieldAndLayoutTest {
         assertEquals("PH_RENT_20261126_0002", remaining.getRecords().get(0).getRecordId());
         assertEquals("01822222222", remaining.getRecords().get(0).getMobile());
     }
+
+    @Test
+    public void resolvesCustomFieldsAndDefaultOverridesWithoutDroppingClearedDefaults() {
+        com.propertyhub.offline.model.PropertyFieldConfig custom =
+                new com.propertyhub.offline.model.PropertyFieldConfig(
+                        "custom_floor_no",
+                        PropertyCategory.HOUSE_FOR_RENT,
+                        "ফ্লোর নম্বর",
+                        "৩য় তলা",
+                        "ফ্লোর নম্বর লিখুন",
+                        com.propertyhub.offline.model.PropertyFieldInputType.SINGLE_LINE,
+                        true,
+                        true,
+                        100,
+                        true,
+                        true
+                );
+
+        String serializedCustom = PropertyFieldCatalog.serializeCustomFields(Collections.singletonList(custom));
+        List<PropertyFieldConfig> parsedCustom = PropertyFieldCatalog.parseCustomFields(
+                serializedCustom, PropertyCategory.HOUSE_FOR_RENT);
+        assertEquals(1, parsedCustom.size());
+        assertEquals("custom_floor_no", parsedCustom.get(0).getFieldId());
+        assertTrue(parsedCustom.get(0).isCustom());
+        assertTrue(parsedCustom.get(0).isRequired());
+
+        java.util.Map<String, String> overrides = new java.util.HashMap<>();
+        overrides.put("title", ""); // explicit cleared default
+        overrides.put("address", "ময়মনসিংহ সদর");
+
+        String serializedOverrides = PropertyFieldCatalog.serializeDefaultOverrides(overrides);
+        java.util.Map<String, String> parsedOverrides =
+                PropertyFieldCatalog.parseDefaultOverrides(serializedOverrides);
+
+        List<PropertyFieldConfig> resolved = PropertyFieldCatalog.resolveEffectiveFields(
+                PropertyCategory.HOUSE_FOR_RENT, parsedCustom, parsedOverrides);
+
+        assertEquals(5, resolved.size());
+        assertEquals("title", resolved.get(0).getFieldId());
+        assertEquals("", resolved.get(0).getDefaultValue());
+        assertEquals("address", resolved.get(2).getFieldId());
+        assertEquals("ময়মনসিংহ সদর", resolved.get(2).getDefaultValue());
+        // Custom field is placed cleanly before mobile
+        assertEquals("custom_floor_no", resolved.get(3).getFieldId());
+        assertEquals("mobile", resolved.get(4).getFieldId());
+    }
 }

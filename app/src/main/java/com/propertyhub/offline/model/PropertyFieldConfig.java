@@ -14,6 +14,7 @@ public final class PropertyFieldConfig {
     private final boolean supportsFormatting;
     private final int displayOrder;
     private final boolean posterVisible;
+    private final boolean custom;
 
     public PropertyFieldConfig(
             @NonNull String fieldId,
@@ -27,6 +28,34 @@ public final class PropertyFieldConfig {
             int displayOrder,
             boolean posterVisible
     ) {
+        this(
+                fieldId,
+                category,
+                label,
+                defaultValue,
+                placeholder,
+                inputType,
+                required,
+                supportsFormatting,
+                displayOrder,
+                posterVisible,
+                false
+        );
+    }
+
+    public PropertyFieldConfig(
+            @NonNull String fieldId,
+            @NonNull PropertyCategory category,
+            @NonNull String label,
+            @NonNull String defaultValue,
+            @NonNull String placeholder,
+            @NonNull PropertyFieldInputType inputType,
+            boolean required,
+            boolean supportsFormatting,
+            int displayOrder,
+            boolean posterVisible,
+            boolean custom
+    ) {
         this.fieldId = fieldId;
         this.category = category;
         this.label = label;
@@ -37,6 +66,24 @@ public final class PropertyFieldConfig {
         this.supportsFormatting = supportsFormatting;
         this.displayOrder = displayOrder;
         this.posterVisible = posterVisible;
+        this.custom = custom;
+    }
+
+    @NonNull
+    public PropertyFieldConfig withDefaultValue(@NonNull String newDefaultValue) {
+        return new PropertyFieldConfig(
+                fieldId,
+                category,
+                label,
+                newDefaultValue,
+                placeholder,
+                inputType,
+                required,
+                supportsFormatting,
+                displayOrder,
+                posterVisible,
+                custom
+        );
     }
 
     @NonNull
@@ -83,6 +130,10 @@ public final class PropertyFieldConfig {
 
     public boolean isPosterVisible() {
         return posterVisible;
+    }
+
+    public boolean isCustom() {
+        return custom;
     }
 
     public boolean isTitleField() {

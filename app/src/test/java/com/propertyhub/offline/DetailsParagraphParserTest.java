@@ -137,10 +137,10 @@ public class DetailsParagraphParserTest {
 
     @Test
     public void clampPosterHeightEnforcesMinAndMaxBounds() {
-        assertEquals(2160, DynamicPosterLayoutEngine.MAX_POSTER_HEIGHT_PX);
+        assertEquals(2560, DynamicPosterLayoutEngine.MAX_POSTER_HEIGHT_PX);
         assertEquals(480, DynamicPosterLayoutEngine.clampPosterHeight(120));
         assertEquals(980, DynamicPosterLayoutEngine.clampPosterHeight(980));
-        assertEquals(2160, DynamicPosterLayoutEngine.clampPosterHeight(2160));
-        assertEquals(2160, DynamicPosterLayoutEngine.clampPosterHeight(4800));
+        assertEquals(2560, DynamicPosterLayoutEngine.clampPosterHeight(2560));
+        assertEquals(2560, DynamicPosterLayoutEngine.clampPosterHeight(4800));
     }
 }

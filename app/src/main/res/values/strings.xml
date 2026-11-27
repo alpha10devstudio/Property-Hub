@@ -75,4 +75,23 @@
     <string name="zip_exports_subtitle">Archive generated JPG posters into Property Hub/ZIP Exports.</string>
     <string name="include_txt_records">Include TXT records in archive</string>
     <string name="create_zip_archive">Create ZIP Archive</string>
+
+    <!-- Dynamic Custom Fields & Defaults -->
+    <string name="customize_fields_action">Fields</string>
+    <string name="settings_manage_fields_title">Form Fields &amp; Defaults</string>
+    <string name="settings_manage_fields_desc">Set custom default values per field or add new dynamic input fields.</string>
+    <string name="manage_fields_title">Form Fields &amp; Defaults</string>
+    <string name="manage_fields_subtitle">Changes apply cleanly to new forms without altering saved records.</string>
+    <string name="add_custom_field_cta">+ Add New Input Field</string>
+    <string name="add_custom_field_title">Add Custom Input Field</string>
+    <string name="custom_field_name_label">Field Name / Label *</string>
+    <string name="custom_field_name_hint">e.g. ফ্লোর নম্বর, গ্যারেজ সুবিধা, রাস্তার প্রস্থ</string>
+    <string name="custom_field_default_label">Default Value (Optional)</string>
+    <string name="custom_field_default_hint">Leave blank if no preset value needed</string>
+    <string name="custom_field_type_label">Input Type</string>
+    <string name="custom_field_requirement_label">Field Requirement (Select One) *</string>
+    <string name="field_required_option">Required</string>
+    <string name="field_optional_option">Optional</string>
+    <string name="error_select_required_or_optional">Please select Required or Optional before adding this field.</string>
+    <string name="save_custom_field">Add Field</string>
 </resources>

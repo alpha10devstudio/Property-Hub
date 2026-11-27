@@ -18,6 +18,7 @@ export interface PropertyFieldConfig {
   formattable: boolean;
   displayOrder: number;
   showOnPosterBody: boolean;
+  custom?: boolean;
 }
 
 export interface PropertyFieldValue {
@@ -225,12 +226,70 @@ export const LAND_FIELDS: PropertyFieldConfig[] = [
   },
 ];
 
-export function getFieldsForCategory(category: CategoryCode): PropertyFieldConfig[] {
-  return category === 'HOUSE_FOR_RENT' ? HOUSE_FIELDS : LAND_FIELDS;
+export function getFieldsForCategory(
+  category: CategoryCode,
+  customFields: PropertyFieldConfig[] = [],
+  defaultOverrides: Record<string, string> = {}
+): PropertyFieldConfig[] {
+  const base = category === 'HOUSE_FOR_RENT' ? HOUSE_FIELDS : LAND_FIELDS;
+  const result: PropertyFieldConfig[] = [];
+
+  for (const cfg of base) {
+    if (cfg.fieldId === 'mobile') continue;
+    const override = Object.prototype.hasOwnProperty.call(defaultOverrides, cfg.fieldId)
+      ? defaultOverrides[cfg.fieldId]
+      : cfg.defaultValue;
+    result.push({ ...cfg, defaultValue: override });
+  }
+
+  for (const cf of customFields) {
+    if (cf.category !== category) continue;
+    const override = Object.prototype.hasOwnProperty.call(defaultOverrides, cf.fieldId)
+      ? defaultOverrides[cf.fieldId]
+      : cf.defaultValue;
+    result.push({ ...cf, defaultValue: override, custom: true });
+  }
+
+  const mobileCfg = base.find((c) => c.fieldId === 'mobile');
+  if (mobileCfg) {
+    const override = Object.prototype.hasOwnProperty.call(defaultOverrides, mobileCfg.fieldId)
+      ? defaultOverrides[mobileCfg.fieldId]
+      : mobileCfg.defaultValue;
+    result.push({ ...mobileCfg, defaultValue: override });
+  }
+  return result;
 }
 
-export function getDefaultTitle(category: CategoryCode): string {
+export function getDefaultTitle(
+  category: CategoryCode,
+  defaultOverrides: Record<string, string> = {}
+): string {
+  if (
+    Object.prototype.hasOwnProperty.call(defaultOverrides, 'title') &&
+    defaultOverrides.title.trim().length > 0
+  ) {
+    return defaultOverrides.title.trim();
+  }
   return category === 'HOUSE_FOR_RENT' ? HOUSE_DEFAULT_TITLE : LAND_DEFAULT_TITLE;
+}
+
+export function generateCustomFieldId(
+  label: string,
+  existingFields: PropertyFieldConfig[]
+): string {
+  const used = new Set(existingFields.map((f) => f.fieldId));
+  const ascii = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  const base = `custom_${ascii || 'field'}`;
+  if (!used.has(base)) return base;
+  let counter = 2;
+  while (used.has(`${base}_${counter}`)) {
+    counter += 1;
+  }
+  return `${base}_${counter}`;
 }
 
 export function isValidBangladeshiMobile(rawInput: string): boolean {
@@ -292,16 +351,25 @@ export function buildPosterFileName(category: CategoryCode, recordId: string): s
 
 export function buildHumanReadableSummary(
   category: CategoryCode,
-  fieldValues: PropertyFieldValue[]
+  fieldValues: PropertyFieldValue[],
+  customFields: PropertyFieldConfig[] = []
 ): string {
-  const configs = getFieldsForCategory(category);
+  const configs = getFieldsForCategory(category, customFields);
   const byId = new Map(fieldValues.map((v) => [v.fieldId, v]));
+  const seen = new Set<string>();
   const lines: string[] = [];
   for (const cfg of configs) {
+    seen.add(cfg.fieldId);
     if (!cfg.showOnPosterBody) continue;
     const val = byId.get(cfg.fieldId);
     if (val && val.plainText.trim()) {
       lines.push(`${cfg.label}: ${val.plainText.trim()}`);
+    }
+  }
+  for (const fv of fieldValues) {
+    if (seen.has(fv.fieldId) || fv.fieldId === 'title' || fv.fieldId === 'mobile') continue;
+    if (fv.plainText.trim()) {
+      lines.push(`${fv.label ? `${fv.label}: ` : ''}${fv.plainText.trim()}`);
     }
   }
   return lines.join('\n');
@@ -310,10 +378,29 @@ export function buildHumanReadableSummary(
 export function getPosterVisibleFieldValues(record: PropertyRecord): PropertyFieldValue[] {
   if (record.fieldValues && record.fieldValues.length > 0) {
     const configs = getFieldsForCategory(record.category);
+    const knownIds = new Set(configs.map((c) => c.fieldId));
     const bodyIds = new Set(configs.filter((c) => c.showOnPosterBody).map((c) => c.fieldId));
-    return record.fieldValues.filter(
-      (fv) => bodyIds.has(fv.fieldId) && fv.plainText.trim().length > 0
-    );
+    const byId = new Map(record.fieldValues.map((fv) => [fv.fieldId, fv]));
+    const ordered: PropertyFieldValue[] = [];
+
+    for (const cfg of configs) {
+      if (!bodyIds.has(cfg.fieldId)) continue;
+      const fv = byId.get(cfg.fieldId);
+      if (fv && fv.plainText.trim().length > 0) {
+        ordered.push(fv);
+      }
+    }
+
+    // Preserve any custom/dynamic fields stored in record.fieldValues (not title/mobile)
+    for (const fv of record.fieldValues) {
+      if (fv.fieldId === 'title' || fv.fieldId === 'mobile' || knownIds.has(fv.fieldId)) {
+        continue;
+      }
+      if (fv.plainText.trim().length > 0) {
+        ordered.push(fv);
+      }
+    }
+    return ordered;
   }
   if (!record.details.trim()) return [];
   const label = record.category === 'HOUSE_FOR_RENT' ? 'বর্ণনা' : 'জমির তথ্য';

@@ -9,10 +9,16 @@ import androidx.annotation.Nullable;
 
 import com.propertyhub.offline.model.AppThemeMode;
 import com.propertyhub.offline.model.PropertyCategory;
+import com.propertyhub.offline.model.PropertyFieldCatalog;
+import com.propertyhub.offline.model.PropertyFieldConfig;
+import com.propertyhub.offline.model.PropertyFieldInputType;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class SettingsManager {
@@ -25,6 +31,10 @@ public class SettingsManager {
     private static final String KEY_HOUSE_SEQ = "next_house_record_seq";
     private static final String KEY_LAND_SEQ = "next_land_record_seq";
     private static final String KEY_POSTER_MANIFEST = "generated_poster_manifest_ids";
+    private static final String KEY_HOUSE_CUSTOM_FIELDS = "custom_fields_house_json";
+    private static final String KEY_LAND_CUSTOM_FIELDS = "custom_fields_land_json";
+    private static final String KEY_HOUSE_DEFAULT_OVERRIDES = "default_overrides_house_json";
+    private static final String KEY_LAND_DEFAULT_OVERRIDES = "default_overrides_land_json";
 
     private final SharedPreferences prefs;
 
@@ -134,5 +144,123 @@ public class SettingsManager {
         if (current.remove(category.name() + "|" + recordId.trim().toUpperCase(Locale.US))) {
             prefs.edit().putStringSet(KEY_POSTER_MANIFEST, current).apply();
         }
+    }
+
+    @NonNull
+    public synchronized List<PropertyFieldConfig> getCustomFields(@NonNull PropertyCategory category) {
+        String key = category == PropertyCategory.HOUSE_FOR_RENT
+                ? KEY_HOUSE_CUSTOM_FIELDS
+                : KEY_LAND_CUSTOM_FIELDS;
+        return PropertyFieldCatalog.parseCustomFields(prefs.getString(key, null), category);
+    }
+
+    public synchronized void saveCustomFields(
+            @NonNull PropertyCategory category,
+            @NonNull List<PropertyFieldConfig> customFields
+    ) {
+        String key = category == PropertyCategory.HOUSE_FOR_RENT
+                ? KEY_HOUSE_CUSTOM_FIELDS
+                : KEY_LAND_CUSTOM_FIELDS;
+        prefs.edit().putString(key, PropertyFieldCatalog.serializeCustomFields(customFields)).apply();
+    }
+
+    @NonNull
+    public synchronized PropertyFieldConfig addCustomField(
+            @NonNull PropertyCategory category,
+            @NonNull String label,
+            @NonNull String defaultValue,
+            @NonNull PropertyFieldInputType inputType,
+            boolean required
+    ) {
+        List<PropertyFieldConfig> existingAll = getEffectiveFields(category);
+        List<PropertyFieldConfig> customOnly = new ArrayList<>(getCustomFields(category));
+
+        String cleanLabel = label.trim();
+        String fieldId = PropertyFieldCatalog.generateCustomFieldId(category, cleanLabel, existingAll);
+        int maxOrder = 100;
+        for (PropertyFieldConfig cf : customOnly) {
+            if (cf.getDisplayOrder() >= maxOrder) {
+                maxOrder = cf.getDisplayOrder() + 1;
+            }
+        }
+        boolean supportsFormatting = inputType == PropertyFieldInputType.SINGLE_LINE
+                || inputType == PropertyFieldInputType.MULTILINE;
+
+        PropertyFieldConfig added = new PropertyFieldConfig(
+                fieldId,
+                category,
+                cleanLabel,
+                defaultValue,
+                cleanLabel + " লিখুন",
+                inputType,
+                required,
+                supportsFormatting,
+                maxOrder,
+                true,
+                true
+        );
+        customOnly.add(added);
+        saveCustomFields(category, customOnly);
+        return added;
+    }
+
+    public synchronized void removeCustomField(
+            @NonNull PropertyCategory category,
+            @NonNull String fieldId
+    ) {
+        List<PropertyFieldConfig> customOnly = new ArrayList<>(getCustomFields(category));
+        boolean changed = false;
+        for (int i = customOnly.size() - 1; i >= 0; i--) {
+            if (fieldId.equals(customOnly.get(i).getFieldId())) {
+                customOnly.remove(i);
+                changed = true;
+            }
+        }
+        if (changed) {
+            saveCustomFields(category, customOnly);
+        }
+        setFieldDefaultOverride(category, fieldId, null);
+    }
+
+    @NonNull
+    public synchronized Map<String, String> getFieldDefaultOverrides(@NonNull PropertyCategory category) {
+        String key = category == PropertyCategory.HOUSE_FOR_RENT
+                ? KEY_HOUSE_DEFAULT_OVERRIDES
+                : KEY_LAND_DEFAULT_OVERRIDES;
+        return PropertyFieldCatalog.parseDefaultOverrides(prefs.getString(key, null));
+    }
+
+    public synchronized void setFieldDefaultOverride(
+            @NonNull PropertyCategory category,
+            @NonNull String fieldId,
+            @Nullable String defaultValue
+    ) {
+        String key = category == PropertyCategory.HOUSE_FOR_RENT
+                ? KEY_HOUSE_DEFAULT_OVERRIDES
+                : KEY_LAND_DEFAULT_OVERRIDES;
+        Map<String, String> overrides = getFieldDefaultOverrides(category);
+        if (defaultValue == null) {
+            overrides.remove(fieldId);
+        } else {
+            overrides.put(fieldId, defaultValue);
+        }
+        prefs.edit().putString(key, PropertyFieldCatalog.serializeDefaultOverrides(overrides)).apply();
+    }
+
+    @NonNull
+    public synchronized List<PropertyFieldConfig> getEffectiveFields(@NonNull PropertyCategory category) {
+        return PropertyFieldCatalog.resolveEffectiveFields(
+                category,
+                getCustomFields(category),
+                getFieldDefaultOverrides(category)
+        );
+    }
+
+    @NonNull
+    public synchronized String getEffectiveDefaultTitle(@NonNull PropertyCategory category) {
+        return PropertyFieldCatalog.getEffectiveDefaultTitle(
+                category,
+                getFieldDefaultOverrides(category)
+        );
     }
 }

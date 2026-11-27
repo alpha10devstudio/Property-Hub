@@ -88,9 +88,8 @@ public final class PosterTextFitter {
         }
 
         private void applyStyle(@NonNull TextPaint paint) {
-            int style = (bold ? Typeface.BOLD : 0) | (italic ? Typeface.ITALIC : 0);
             if (baseTypeface != null) {
-                Typeface styled = Typeface.create(baseTypeface, style);
+                Typeface styled = PosterFontLoader.getStyledVariant(baseTypeface, bold, italic);
                 paint.setTypeface(styled);
                 if (bold && !styled.isBold()) {
                     paint.setFakeBoldText(true);
@@ -99,7 +98,7 @@ public final class PosterTextFitter {
                     paint.setTextSkewX(-0.24f);
                 }
             } else {
-                paint.setTypeface(Typeface.create(paint.getTypeface(), style));
+                paint.setTypeface(PosterFontLoader.getStyledVariant(paint.getTypeface(), bold, italic));
                 if (bold) {
                     paint.setFakeBoldText(true);
                 }

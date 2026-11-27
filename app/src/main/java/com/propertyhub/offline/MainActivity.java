@@ -35,6 +35,7 @@ import com.propertyhub.offline.model.AppThemeMode;
 import com.propertyhub.offline.model.PropertyCategory;
 import com.propertyhub.offline.poster.AutoPosterManager;
 import com.propertyhub.offline.poster.BulkPosterManager;
+import com.propertyhub.offline.poster.PosterFontLoader;
 import com.propertyhub.offline.poster.PosterRenderer;
 import com.propertyhub.offline.storage.SettingsManager;
 import com.propertyhub.offline.storage.StorageManager;
@@ -114,6 +115,9 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         autoPosterManager = new AutoPosterManager(storageManager, posterRenderer, hostIoExecutor);
         bulkPosterManager = new BulkPosterManager(storageManager, posterRenderer);
         zipExportManager = new ZipExportManager(this, storageManager);
+
+        // Warm up Title/Paragraph/Contact Typeface caches off the main thread at cold start
+        hostIoExecutor.execute(() -> PosterFontLoader.preloadAll(this));
 
         if (savedInstanceState != null) {
             activeScreen = savedInstanceState.getInt(STATE_ACTIVE_SCREEN, SCREEN_COLLECT);
@@ -257,7 +261,9 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         activeScreen = screen;
         updateHeaderIconStates();
 
-        if (screen == SCREEN_SETTINGS && settings instanceof SettingsFragment) {
+        if (screen == SCREEN_COLLECT && collect instanceof CollectDataFragment) {
+            ((CollectDataFragment) collect).refreshFormsPreservingDrafts();
+        } else if (screen == SCREEN_SETTINGS && settings instanceof SettingsFragment) {
             ((SettingsFragment) settings).refreshUi();
         } else if (screen == SCREEN_FILES && files instanceof GeneratedFilesFragment) {
             ((GeneratedFilesFragment) files).refreshAllData();
@@ -432,6 +438,14 @@ public class MainActivity extends AppCompatActivity implements MainHostCallbacks
         Fragment files = getSupportFragmentManager().findFragmentByTag(TAG_FILES);
         if (files instanceof GeneratedFilesFragment) {
             ((GeneratedFilesFragment) files).refreshAllData();
+        }
+    }
+
+    @Override
+    public void notifyFieldsUpdated() {
+        Fragment collect = getSupportFragmentManager().findFragmentByTag(TAG_COLLECT);
+        if (collect instanceof CollectDataFragment) {
+            ((CollectDataFragment) collect).refreshFormsPreservingDrafts();
         }
     }
 

@@ -48,6 +48,7 @@ public class StorageManager {
     private final SettingsManager settingsManager;
     private final RecordIdManager recordIdManager;
     private final DateTimeProvider dateTimeProvider;
+    private final Map<String, Long> cachedFolderMaxSeq = new HashMap<>();
 
     public static final class RecordsQueryResult {
         private final List<PropertyRecord> records;
@@ -198,6 +199,7 @@ public class StorageManager {
                 }
 
                 settingsManager.setSavedTreeUri(treeUri);
+                cachedFolderMaxSeq.clear();
 
                 // Reconcile ID sequences against existing records in the selected directory
                 reconcileMaxSequenceLocked(propertyHubDir, PropertyCategory.HOUSE_FOR_RENT);
@@ -329,7 +331,7 @@ public class StorageManager {
 
                 long observedMax = Math.max(
                         extractMaxSequenceFromText(category, existingContent),
-                        scanMaxSequenceInCategoryFolder(propertyHubDir, category)
+                        getOrScanFolderMaxSequenceLocked(propertyHubDir, category)
                 );
                 String recordId = recordIdManager.allocateNextRecordId(category, dateStr, observedMax);
 
@@ -347,6 +349,7 @@ public class StorageManager {
 
                 String updatedContent = RecordFormatter.appendRecordToContent(existingContent, record);
                 writeTxtViaStagingAndVerify(categoryDir, dailyFile, targetFileName, updatedContent, recordId);
+                updateCachedFolderMaxSeqLocked(category, RecordIdManager.extractNumericSuffix(category, recordId));
 
                 String displayPath = ROOT_FOLDER_NAME + "/"
                         + category.getFolderName() + "/" + targetFileName;
@@ -1087,8 +1090,41 @@ public class StorageManager {
             @NonNull PropertyCategory category
     ) {
         long max = scanMaxSequenceInCategoryFolder(propertyHubDir, category);
+        updateCachedFolderMaxSeqLocked(category, max);
         if (max > 0) {
             settingsManager.setLastSequence(category, max);
+        }
+    }
+
+    @NonNull
+    private String buildSeqCacheKey(@NonNull PropertyCategory category) {
+        Uri treeUri = getSavedTreeUri();
+        String uriStr = treeUri != null ? treeUri.toString() : "";
+        return uriStr + "|" + category.name();
+    }
+
+    private long getOrScanFolderMaxSequenceLocked(
+            @NonNull DocumentFile propertyHubDir,
+            @NonNull PropertyCategory category
+    ) {
+        String key = buildSeqCacheKey(category);
+        Long cached = cachedFolderMaxSeq.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        long scanned = scanMaxSequenceInCategoryFolder(propertyHubDir, category);
+        cachedFolderMaxSeq.put(key, scanned);
+        return scanned;
+    }
+
+    private void updateCachedFolderMaxSeqLocked(
+            @NonNull PropertyCategory category,
+            long candidateSeq
+    ) {
+        String key = buildSeqCacheKey(category);
+        Long existing = cachedFolderMaxSeq.get(key);
+        if (existing == null || candidateSeq > existing) {
+            cachedFolderMaxSeq.put(key, candidateSeq);
         }
     }
 

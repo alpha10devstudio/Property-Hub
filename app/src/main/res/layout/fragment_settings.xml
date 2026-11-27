@@ -174,6 +174,68 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- 2b. Form Fields & Defaults -->
+        <com.google.android.material.card.MaterialCardView
+            android:id="@+id/cardFormFieldsDefaults"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:clickable="true"
+            android:focusable="true"
+            app:cardBackgroundColor="?attr/phCardBg"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="1dp"
+            app:strokeColor="?attr/phCardStroke"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="14dp">
+
+                <ImageView
+                    android:layout_width="32dp"
+                    android:layout_height="32dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_document"
+                    app:tint="?attr/phAccentBlue" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="14dp"
+                    android:layout_marginEnd="8dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_manage_fields_title"
+                        android:textColor="?attr/phTextPrimary"
+                        android:textSize="15.5sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_manage_fields_desc"
+                        android:textColor="?attr/phTextSecondary"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:contentDescription="@null"
+                    android:src="@drawable/ic_chevron_right"
+                    app:tint="?attr/phTextSecondary" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- 3. App Theme -->
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/cardAppTheme"

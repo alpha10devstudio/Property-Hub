@@ -93,6 +93,7 @@ function populateDomFromSegments(root: HTMLElement, segments: StyledSegment[]) {
 }
 
 export const RichFieldInput: React.FC<RichFieldInputProps> = ({
+  fieldId,
   label,
   required,
   multiline,
@@ -112,7 +113,7 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
 
   useEffect(() => {
     if (!formattable || !editorRef.current) return;
-    populateDomFromSegments(editorRef.current, value.segments);
+    populateDomFromSegments(editorRef.current, value?.segments ?? []);
     setBoldActive(false);
     setItalicActive(false);
   }, [resetToken, formattable]);
@@ -146,7 +147,7 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
     }
     const extracted = extractDomSegments(el);
     onChange({
-      ...value,
+      ...(value ?? { fieldId, label, plainText: '', segments: [] }),
       plainText: extracted.plainText,
       segments: extracted.segments,
     });
@@ -160,7 +161,7 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
       : 'border-[#0B8A38] bg-[#0B8A38] text-white';
 
   return (
-    <div>
+    <div data-field-id={fieldId}>
       <div className="mb-1 flex items-center justify-between gap-2">
         <label className="text-[13px] font-bold">
           {label}
@@ -206,7 +207,7 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
 
       {formattable ? (
         <div className="relative">
-          {!value.plainText && (
+          {!(value?.plainText ?? '') && (
             <span className="pointer-events-none absolute left-3 top-2.5 text-[13px] text-slate-400">
               {placeholder}
             </span>
@@ -218,7 +219,7 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
             onInput={(e) => {
               const extracted = extractDomSegments(e.currentTarget);
               onChange({
-                ...value,
+                ...(value ?? { fieldId, label, plainText: '', segments: [] }),
                 plainText: extracted.plainText,
                 segments: extracted.segments,
               });
@@ -236,11 +237,11 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
       ) : (
         <input
           type={inputType === 'PHONE' ? 'tel' : 'text'}
-          value={value.plainText}
+          value={value?.plainText ?? ''}
           onChange={(e) => {
             const text = e.target.value;
             onChange({
-              ...value,
+              ...(value ?? { fieldId, label, plainText: '', segments: [] }),
               plainText: text,
               segments: text ? [{ text, bold: false, italic: false }] : [],
             });

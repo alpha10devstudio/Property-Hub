@@ -50,4 +50,6 @@ public interface MainHostCallbacks {
     void refreshStorageBanner();
 
     void notifyFilesUpdated();
+
+    void notifyFieldsUpdated();
 }

@@ -41,9 +41,12 @@ import com.propertyhub.offline.poster.DetailsParagraphParser.StyledSegment;
 import com.propertyhub.offline.storage.StorageResult;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -67,6 +70,9 @@ public class CategoryFormPageFragment extends Fragment {
     private long lastSubmitElapsedMs = 0L;
 
     private final List<FieldBinding> fieldBindings = new ArrayList<>();
+    private final Set<String> activeFieldIds = new HashSet<>();
+    private LinearLayout fieldsContainer;
+    private boolean isHouseTheme = true;
     private MaterialButton btnCategorySubmit;
     private ProgressBar progressSubmit;
 
@@ -136,12 +142,14 @@ public class CategoryFormPageFragment extends Fragment {
         super.onViewCreated(view, savedInstanceState);
 
         boolean isHouse = category == PropertyCategory.HOUSE_FOR_RENT;
+        isHouseTheme = isHouse;
         FrameLayout bannerFrame = view.findViewById(R.id.categoryBannerFrame);
         ImageView ivBannerArt = view.findViewById(R.id.ivCategoryBannerArt);
         ImageView ivBannerIcon = view.findViewById(R.id.ivCategoryBannerIcon);
         TextView tvBannerTitle = view.findViewById(R.id.tvCategoryBannerTitle);
         TextView tvBannerSubtitle = view.findViewById(R.id.tvCategoryBannerSubtitle);
-        LinearLayout fieldsContainer = view.findViewById(R.id.fieldsContainer);
+        MaterialButton btnCustomizeFields = view.findViewById(R.id.btnCustomizeFields);
+        fieldsContainer = view.findViewById(R.id.fieldsContainer);
         btnCategorySubmit = view.findViewById(R.id.btnCategorySubmit);
         progressSubmit = view.findViewById(R.id.progressSubmit);
 
@@ -168,16 +176,55 @@ public class CategoryFormPageFragment extends Fragment {
         }
 
         Map<String, PropertyFieldValue> restoredMap = new HashMap<>();
+        Set<String> restoredIds = new HashSet<>();
         if (savedInstanceState != null) {
             String json = savedInstanceState.getString(STATE_FIELDS_JSON);
             for (PropertyFieldValue fv : PropertyFieldValue.fromJsonArrayString(json)) {
                 restoredMap.put(fv.getFieldId(), fv);
+                restoredIds.add(fv.getFieldId());
             }
         }
 
-        buildDynamicFields(fieldsContainer, isHouse, restoredMap);
+        buildDynamicFields(fieldsContainer, isHouse, restoredMap, restoredIds);
+
+        btnCustomizeFields.setOnClickListener(v -> {
+            if (host == null) {
+                return;
+            }
+            FieldCustomizationDialogHelper.show(
+                    requireContext(),
+                    host.getSettingsManager(),
+                    category,
+                    () -> {
+                        if (host != null) {
+                            host.notifyFieldsUpdated();
+                        } else {
+                            refreshFieldsPreservingDrafts();
+                        }
+                    }
+            );
+        });
 
         btnCategorySubmit.setOnClickListener(v -> triggerSubmit());
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        refreshFieldsPreservingDrafts();
+    }
+
+    public void refreshFieldsPreservingDrafts() {
+        if (!isAdded() || fieldsContainer == null || host == null) {
+            return;
+        }
+        Map<String, PropertyFieldValue> draftSnapshot = new HashMap<>();
+        Set<String> previousIds = new HashSet<>(activeFieldIds);
+        for (PropertyFieldValue fv : collectFieldValues()) {
+            draftSnapshot.put(fv.getFieldId(), fv);
+            previousIds.add(fv.getFieldId());
+        }
+        buildDynamicFields(fieldsContainer, isHouseTheme, draftSnapshot, previousIds);
     }
 
     @Override
@@ -226,7 +273,9 @@ public class CategoryFormPageFragment extends Fragment {
             }
         }
         if (titleValue.isEmpty()) {
-            titleValue = PropertyFieldCatalog.getDefaultTitle(category);
+            titleValue = host != null
+                    ? host.getSettingsManager().getEffectiveDefaultTitle(category)
+                    : PropertyFieldCatalog.getDefaultTitle(category);
         }
 
         final String finalTitle = titleValue;
@@ -252,13 +301,17 @@ public class CategoryFormPageFragment extends Fragment {
     private void buildDynamicFields(
             @NonNull LinearLayout container,
             boolean isHouse,
-            @NonNull Map<String, PropertyFieldValue> restoredMap
+            @NonNull Map<String, PropertyFieldValue> restoredMap,
+            @NonNull Set<String> previouslyRenderedIds
     ) {
         container.removeAllViews();
         fieldBindings.clear();
+        activeFieldIds.clear();
 
         LayoutInflater inflater = LayoutInflater.from(requireContext());
-        List<PropertyFieldConfig> configs = PropertyFieldCatalog.getFieldsForCategory(category);
+        List<PropertyFieldConfig> configs = host != null
+                ? host.getSettingsManager().getEffectiveFields(category)
+                : PropertyFieldCatalog.getFieldsForCategory(category);
         int circleBgRes = isHouse ? R.drawable.bg_circle_blue : R.drawable.bg_circle_green;
         int inputBgRes = isHouse ? R.drawable.bg_input_field_blue : R.drawable.bg_input_field_green;
         int iconTint = ContextCompat.getColor(requireContext(), isHouse ? R.color.blue_icon : R.color.green_icon);
@@ -266,6 +319,7 @@ public class CategoryFormPageFragment extends Fragment {
 
         for (int idx = 0; idx < configs.size(); idx++) {
             PropertyFieldConfig cfg = configs.get(idx);
+            activeFieldIds.add(cfg.getFieldId());
             View row = inflater.inflate(R.layout.item_dynamic_field, container, false);
 
             FrameLayout iconBadge = row.findViewById(R.id.fieldIconBadge);
@@ -286,8 +340,9 @@ public class CategoryFormPageFragment extends Fragment {
 
             configureEditTextInput(editText, cfg, idx == configs.size() - 1);
 
+            boolean wasExistingDraftField = previouslyRenderedIds.contains(cfg.getFieldId());
             PropertyFieldValue restored = restoredMap.get(cfg.getFieldId());
-            if (restored != null) {
+            if (wasExistingDraftField && restored != null) {
                 if (cfg.supportsFormatting()) {
                     editText.setText(RichTextSpannableCodec.toSpannable(restored.getSegments()));
                 } else {
@@ -443,6 +498,10 @@ public class CategoryFormPageFragment extends Fragment {
     }
 
     private void resetFormToDefaults() {
+        if (isAdded() && fieldsContainer != null && host != null) {
+            buildDynamicFields(fieldsContainer, isHouseTheme, Collections.emptyMap(), Collections.emptySet());
+            return;
+        }
         for (FieldBinding binding : fieldBindings) {
             binding.editText.setError(null);
             binding.editText.setText(binding.config.getDefaultValue());
@@ -543,8 +602,8 @@ public class CategoryFormPageFragment extends Fragment {
         Button btnClose = view.findViewById(R.id.btnPreviewClose);
         Button btnShare = view.findViewById(R.id.btnPreviewShare);
 
-        title.setText("Long Content Review · " + record.getRecordId());
-        sub.setText("TXT saved cleanly, and the dynamic-height poster was adjusted to fit all content. Please review the layout.");
+        title.setText("Max Height Reached (1440×2560px) · " + record.getRecordId());
+        sub.setText("TXT saved cleanly. Poster text exceeded the 2560px maximum height even after spacing and font optimization—please review the preview or shorten lengthy content slightly.");
         btnShare.setVisibility(View.GONE);
         iv.setImageURI(posterUri);
 

@@ -95,6 +95,17 @@ public class CollectDataFragment extends Fragment {
         });
     }
 
+    public void refreshFormsPreservingDrafts() {
+        if (!isAdded()) {
+            return;
+        }
+        for (Fragment child : getChildFragmentManager().getFragments()) {
+            if (child instanceof CategoryFormPageFragment) {
+                ((CategoryFormPageFragment) child).refreshFieldsPreservingDrafts();
+            }
+        }
+    }
+
     private void applyTabThemeColor(int position) {
         if (!isAdded() || categoryTabLayout == null) {
             return;

@@ -1,6 +1,7 @@
 package com.propertyhub.offline.poster;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
@@ -16,20 +17,53 @@ import androidx.annotation.Nullable;
 import com.propertyhub.offline.model.PropertyFieldValue;
 import com.propertyhub.offline.model.PropertyRecord;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reference Image 1 Exact House for Rent Poster Template (Dynamic Auto Height).
  * Navy Blue + White design featuring:
  * - Outer navy rounded border
  * - Top roof silhouette + 2x2 windows + tapered horizontal lines
- * - Large navy rounded title banner with white title.ttf text
+ * - Large navy rounded title banner with title font
  * - Single large central rounded panel with left house illustration, vertical separator, and right text
- * - Bottom navy contact banner with white phone circle, separator, and contact number
+ * - Bottom navy contact banner with white phone circle, separator, and contact font
  */
 public final class HousePosterTemplate {
 
+    private static final int HEADER_BITMAP_HEIGHT = 148;
+    private static final Object CACHE_LOCK = new Object();
+    private static final Map<String, Bitmap> ASSET_CACHE = new LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Bitmap> eldest) {
+            return size() > 6;
+        }
+    };
+
+    private static final Path HANDSET_PATH = createHandsetPath();
+
     private HousePosterTemplate() {
+    }
+
+    private static Path createHandsetPath() {
+        Path handset = new Path();
+        handset.moveTo(-22f, -34f);
+        handset.quadTo(-34f, -32f, -34f, -18f);
+        handset.cubicTo(-34f, 6f, -6f, 34f, 18f, 34f);
+        handset.quadTo(32f, 34f, 34f, 22f);
+        handset.lineTo(34f, 12f);
+        handset.quadTo(34f, 6f, 26f, 4f);
+        handset.lineTo(14f, 2f);
+        handset.quadTo(9f, 1f, 6f, 5f);
+        handset.lineTo(1f, 11f);
+        handset.quadTo(-8f, 6f, -11f, -1f);
+        handset.lineTo(-5f, -6f);
+        handset.quadTo(-1f, -9f, -2f, -14f);
+        handset.lineTo(-4f, -26f);
+        handset.quadTo(-6f, -34f, -12f, -34f);
+        handset.close();
+        return handset;
     }
 
     @NonNull
@@ -61,7 +95,7 @@ public final class HousePosterTemplate {
     ) {
         PosterThemeConfig theme = PosterThemeConfig.houseForRent();
         int navyBlue = theme.getPrimaryColor();
-        Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
+        Typeface contactTypeface = PosterFontLoader.loadContactTypeface(context);
 
         // 1. Crisp White Background & Navy Blue Rounded Outer Border
         canvas.drawColor(theme.getCanvasBackgroundColor());
@@ -77,8 +111,9 @@ public final class HousePosterTemplate {
                 borderPaint
         );
 
-        // 2. Top Roof Silhouette + Tapered Horizontal Lines
-        drawTopRoofEmblem(canvas, plan.width, plan.headerTop, navyBlue);
+        // 2. Top Roof Silhouette + Tapered Horizontal Lines (cached bitmap)
+        Bitmap headerBitmap = getOrCreateTopRoofBitmap(plan.width, navyBlue);
+        canvas.drawBitmap(headerBitmap, 0f, plan.headerTop, null);
 
         Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         fillPaint.setStyle(Paint.Style.FILL);
@@ -117,13 +152,12 @@ public final class HousePosterTemplate {
                 borderPaint
         );
 
-        drawHouseArchitecturalGraphic(
-                canvas,
-                plan.illustCenterX,
-                plan.illustCenterY,
-                plan.illustMaxW,
-                plan.illustMaxH,
-                navyBlue
+        Bitmap houseIllust = getOrCreateHouseGraphicBitmap(plan.illustMaxW, plan.illustMaxH, navyBlue);
+        canvas.drawBitmap(
+                houseIllust,
+                plan.illustCenterX - houseIllust.getWidth() / 2f,
+                plan.illustCenterY - houseIllust.getHeight() / 2f,
+                null
         );
 
         if (plan.hasFields) {
@@ -193,8 +227,9 @@ public final class HousePosterTemplate {
 
         TextPaint mobilePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mobilePaint.setColor(Color.WHITE);
-        mobilePaint.setTypeface(Typeface.create(titleTypeface, Typeface.BOLD));
-        mobilePaint.setFakeBoldText(true);
+        Typeface contactStyled = PosterFontLoader.getStyledVariant(contactTypeface, true, false);
+        mobilePaint.setTypeface(contactStyled);
+        mobilePaint.setFakeBoldText(!contactStyled.isBold());
         mobilePaint.setTextAlign(Paint.Align.CENTER);
         float fittedContactSize = PosterTextFitter.fitSingleLineTextSize(
                 contactLine,
@@ -214,6 +249,40 @@ public final class HousePosterTemplate {
         );
 
         return plan.overflowed;
+    }
+
+    @NonNull
+    private static Bitmap getOrCreateTopRoofBitmap(int width, int navyBlue) {
+        String key = "house_header_" + width + "_" + navyBlue;
+        synchronized (CACHE_LOCK) {
+            Bitmap cached = ASSET_CACHE.get(key);
+            if (cached != null && !cached.isRecycled()) {
+                return cached;
+            }
+            Bitmap bmp = Bitmap.createBitmap(width, HEADER_BITMAP_HEIGHT, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            drawTopRoofEmblem(c, width, 0f, navyBlue);
+            ASSET_CACHE.put(key, bmp);
+            return bmp;
+        }
+    }
+
+    @NonNull
+    private static Bitmap getOrCreateHouseGraphicBitmap(float maxW, float maxH, int navyBlue) {
+        int qW = Math.max(64, Math.round(maxW));
+        int qH = Math.max(64, Math.round(maxH));
+        String key = "house_illust_" + qW + "x" + qH + "_" + navyBlue;
+        synchronized (CACHE_LOCK) {
+            Bitmap cached = ASSET_CACHE.get(key);
+            if (cached != null && !cached.isRecycled()) {
+                return cached;
+            }
+            Bitmap bmp = Bitmap.createBitmap(qW, qH, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            drawHouseArchitecturalGraphic(c, qW / 2f, qH / 2f, qW, qH, navyBlue);
+            ASSET_CACHE.put(key, bmp);
+            return bmp;
+        }
     }
 
     private static void drawTopRoofEmblem(
@@ -380,25 +449,7 @@ public final class HousePosterTemplate {
         canvas.save();
         canvas.translate(cx, cy);
         canvas.scale(s, s);
-
-        Path handset = new Path();
-        handset.moveTo(-22f, -34f);
-        handset.quadTo(-34f, -32f, -34f, -18f);
-        handset.cubicTo(-34f, 6f, -6f, 34f, 18f, 34f);
-        handset.quadTo(32f, 34f, 34f, 22f);
-        handset.lineTo(34f, 12f);
-        handset.quadTo(34f, 6f, 26f, 4f);
-        handset.lineTo(14f, 2f);
-        handset.quadTo(9f, 1f, 6f, 5f);
-        handset.lineTo(1f, 11f);
-        handset.quadTo(-8f, 6f, -11f, -1f);
-        handset.lineTo(-5f, -6f);
-        handset.quadTo(-1f, -9f, -2f, -14f);
-        handset.lineTo(-4f, -26f);
-        handset.quadTo(-6f, -34f, -12f, -34f);
-        handset.close();
-
-        canvas.drawPath(handset, phonePaint);
+        canvas.drawPath(HANDSET_PATH, phonePaint);
         canvas.restore();
     }
 }

@@ -24,10 +24,12 @@ import {
   Loader2,
   MapPin,
   Palette,
+  Plus,
   RefreshCw,
   Send,
   Settings,
   Share2,
+  SlidersHorizontal,
   Trash2,
   X,
 } from 'lucide-react';
@@ -38,11 +40,14 @@ import {
   buildHumanReadableSummary,
   buildPosterFileName,
   CategoryCode,
+  FieldInputType,
+  generateCustomFieldId,
   getDefaultTitle,
   getFieldsForCategory,
   isValidBangladeshiMobile,
   parseTxtContent,
   PosterEntry,
+  PropertyFieldConfig,
   PropertyFieldValue,
   PropertyRecord,
   removeRecordFromTxt,
@@ -64,6 +69,8 @@ interface SimulatorState {
   landFiles: Record<string, string>;
   posters: Record<string, PosterEntry>;
   zips: ZipArchiveEntry[];
+  customFields: Record<CategoryCode, PropertyFieldConfig[]>;
+  defaultOverrides: Record<CategoryCode, Record<string, string>>;
 }
 
 const STORAGE_KEY = 'property_hub_offline_v3';
@@ -84,9 +91,13 @@ function getLocalTimeStr(date = new Date()): string {
   return `${String(hours).padStart(2, '0')}:${minutes} ${ampm}`;
 }
 
-function createInitialFormMap(category: CategoryCode): Record<string, PropertyFieldValue> {
+function createInitialFormMap(
+  category: CategoryCode,
+  customFields: PropertyFieldConfig[] = [],
+  defaultOverrides: Record<string, string> = {}
+): Record<string, PropertyFieldValue> {
   const map: Record<string, PropertyFieldValue> = {};
-  for (const cfg of getFieldsForCategory(category)) {
+  for (const cfg of getFieldsForCategory(category, customFields, defaultOverrides)) {
     const def = cfg.defaultValue;
     map[cfg.fieldId] = {
       fieldId: cfg.fieldId,
@@ -108,20 +119,42 @@ const DEFAULT_STATE: SimulatorState = {
   landFiles: {},
   posters: {},
   zips: [],
+  customFields: {
+    HOUSE_FOR_RENT: [],
+    LAND_FOR_SALE: [],
+  },
+  defaultOverrides: {
+    HOUSE_FOR_RENT: {},
+    LAND_FOR_SALE: {},
+  },
 };
 
-export default function App() {
-  const [state, setState] = useState<SimulatorState>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        return { ...DEFAULT_STATE, ...(JSON.parse(raw) as Partial<SimulatorState>) };
-      }
-    } catch {
-      // Ignore invalid localStorage
+function loadInitialSimulatorState(): SimulatorState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<SimulatorState>;
+      return {
+        ...DEFAULT_STATE,
+        ...parsed,
+        customFields: {
+          HOUSE_FOR_RENT: parsed.customFields?.HOUSE_FOR_RENT ?? [],
+          LAND_FOR_SALE: parsed.customFields?.LAND_FOR_SALE ?? [],
+        },
+        defaultOverrides: {
+          HOUSE_FOR_RENT: parsed.defaultOverrides?.HOUSE_FOR_RENT ?? {},
+          LAND_FOR_SALE: parsed.defaultOverrides?.LAND_FOR_SALE ?? {},
+        },
+      };
     }
-    return DEFAULT_STATE;
-  });
+  } catch {
+    // Ignore invalid localStorage
+  }
+  return DEFAULT_STATE;
+}
+
+export default function App() {
+  const [state, setState] = useState<SimulatorState>(() => loadInitialSimulatorState());
 
   const [activeScreen, setActiveScreen] = useState<ActiveScreen>('collect');
   const [activeCategory, setActiveCategory] = useState<CategoryCode>('HOUSE_FOR_RENT');
@@ -129,10 +162,18 @@ export default function App() {
   const [activeLocalDate, setActiveLocalDate] = useState<string>(() => getLocalDateStr());
 
   const [houseForm, setHouseForm] = useState<Record<string, PropertyFieldValue>>(() =>
-    createInitialFormMap('HOUSE_FOR_RENT')
+    createInitialFormMap(
+      'HOUSE_FOR_RENT',
+      state.customFields.HOUSE_FOR_RENT,
+      state.defaultOverrides.HOUSE_FOR_RENT
+    )
   );
   const [landForm, setLandForm] = useState<Record<string, PropertyFieldValue>>(() =>
-    createInitialFormMap('LAND_FOR_SALE')
+    createInitialFormMap(
+      'LAND_FOR_SALE',
+      state.customFields.LAND_FOR_SALE,
+      state.defaultOverrides.LAND_FOR_SALE
+    )
   );
   const [houseErrors, setHouseErrors] = useState<Record<string, string>>({});
   const [landErrors, setLandErrors] = useState<Record<string, string>>({});
@@ -147,12 +188,24 @@ export default function App() {
     fileName: string;
   } | null>(null);
   const [previewPoster, setPreviewPoster] = useState<PosterEntry | null>(null);
+  const [overflowWarningPoster, setOverflowWarningPoster] = useState<PosterEntry | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     category: CategoryCode;
     recordId: string;
     fileName?: string;
     sourceTxtFile: string;
   } | null>(null);
+
+  // Fields & Defaults Manager modal state
+  const [manageFieldsOpen, setManageFieldsOpen] = useState(false);
+  const [manageCat, setManageCat] = useState<CategoryCode>('HOUSE_FOR_RENT');
+  const [defaultDrafts, setDefaultDrafts] = useState<Record<string, string>>({});
+  const [addFieldModalOpen, setAddFieldModalOpen] = useState(false);
+  const [newFieldLabel, setNewFieldLabel] = useState('');
+  const [newFieldDefault, setNewFieldDefault] = useState('');
+  const [newFieldType, setNewFieldType] = useState<FieldInputType>('SINGLE_LINE');
+  const [newFieldRequired, setNewFieldRequired] = useState<boolean | null>(null);
+  const [newFieldError, setNewFieldError] = useState<string | null>(null);
 
   const [includeTxtInZip, setIncludeTxtInZip] = useState(false);
   const [zipFilterCat, setZipFilterCat] = useState<'ALL' | CategoryCode>('ALL');
@@ -244,12 +297,175 @@ export default function App() {
     return Array.from(set).sort().reverse();
   }, [activeLocalDate, postersList, state.houseFiles, state.landFiles]);
 
+  function syncDefaultDraftsForCategory(cat: CategoryCode, nextState = state) {
+    const cfgs = getFieldsForCategory(
+      cat,
+      nextState.customFields[cat] ?? [],
+      nextState.defaultOverrides[cat] ?? {}
+    );
+    const drafts: Record<string, string> = {};
+    for (const cfg of cfgs) {
+      drafts[cfg.fieldId] = cfg.defaultValue;
+    }
+    setDefaultDrafts(drafts);
+  }
+
+  function openFieldsManager(cat: CategoryCode) {
+    setManageCat(cat);
+    syncDefaultDraftsForCategory(cat);
+    setManageFieldsOpen(true);
+  }
+
+  function handleSaveFieldDefault(cat: CategoryCode, fieldId: string, value: string, isClear = false) {
+    const nextOverrides: Record<string, string> = {
+      ...(state.defaultOverrides[cat] ?? {}),
+      [fieldId]: value,
+    };
+    const nextState: SimulatorState = {
+      ...state,
+      defaultOverrides: {
+        ...state.defaultOverrides,
+        [cat]: nextOverrides,
+      },
+    };
+    setState(nextState);
+    setDefaultDrafts((prev) => ({ ...prev, [fieldId]: value }));
+    showTopToast(
+      isClear ? 'Default Cleared' : 'Default Saved',
+      'Applies to new & reset forms; drafts unchanged.',
+      cat === 'HOUSE_FOR_RENT'
+    );
+  }
+
+  function handleResetFieldDefault(cat: CategoryCode, fieldId: string) {
+    const nextOverrides = { ...(state.defaultOverrides[cat] ?? {}) };
+    delete nextOverrides[fieldId];
+    const nextState: SimulatorState = {
+      ...state,
+      defaultOverrides: {
+        ...state.defaultOverrides,
+        [cat]: nextOverrides,
+      },
+    };
+    setState(nextState);
+    syncDefaultDraftsForCategory(cat, nextState);
+    showTopToast('Default Reset', 'Restored original preset default.', cat === 'HOUSE_FOR_RENT');
+  }
+
+  function openAddCustomFieldModal() {
+    setNewFieldLabel('');
+    setNewFieldDefault('');
+    setNewFieldType('SINGLE_LINE');
+    setNewFieldRequired(null); // CRITICAL: neither Required nor Optional pre-selected
+    setNewFieldError(null);
+    setAddFieldModalOpen(true);
+  }
+
+  function handleCreateCustomField(e: React.FormEvent) {
+    e.preventDefault();
+    const cleanLabel = newFieldLabel.trim();
+    if (!cleanLabel) {
+      setNewFieldError('Please enter a field name / label.');
+      return;
+    }
+    if (newFieldRequired === null) {
+      setNewFieldError('Please explicitly select Required or Optional before adding.');
+      return;
+    }
+
+    const existingAll = getFieldsForCategory(
+      manageCat,
+      state.customFields[manageCat] ?? [],
+      state.defaultOverrides[manageCat] ?? {}
+    );
+    const fieldId = generateCustomFieldId(cleanLabel, existingAll);
+    const customList = state.customFields[manageCat] ?? [];
+    const maxOrder = customList.reduce((m, c) => Math.max(m, c.displayOrder), 99) + 1;
+    const formattable = newFieldType === 'SINGLE_LINE' || newFieldType === 'MULTILINE';
+
+    const added: PropertyFieldConfig = {
+      fieldId,
+      category: manageCat,
+      label: cleanLabel,
+      defaultValue: newFieldDefault,
+      placeholder: `${cleanLabel} লিখুন`,
+      inputType: newFieldType,
+      required: newFieldRequired,
+      formattable,
+      displayOrder: maxOrder,
+      showOnPosterBody: true,
+      custom: true,
+    };
+
+    const nextCustomList = [...customList, added];
+    const nextState: SimulatorState = {
+      ...state,
+      customFields: {
+        ...state.customFields,
+        [manageCat]: nextCustomList,
+      },
+    };
+    setState(nextState);
+    setDefaultDrafts((prev) => ({ ...prev, [added.fieldId]: added.defaultValue }));
+
+    // Add ONLY the newly created field (with its default value) to the active draft form without touching existing fields
+    const newFieldValue: PropertyFieldValue = {
+      fieldId: added.fieldId,
+      label: added.label,
+      plainText: added.defaultValue,
+      segments: added.defaultValue
+        ? [{ text: added.defaultValue, bold: false, italic: false }]
+        : [],
+    };
+    if (manageCat === 'HOUSE_FOR_RENT') {
+      setHouseForm((prev) => ({ ...prev, [added.fieldId]: prev[added.fieldId] ?? newFieldValue }));
+    } else {
+      setLandForm((prev) => ({ ...prev, [added.fieldId]: prev[added.fieldId] ?? newFieldValue }));
+    }
+
+    setAddFieldModalOpen(false);
+    showTopToast(
+      `Added "${added.label}"`,
+      `${added.required ? 'Required' : 'Optional'} · ${manageCat === 'HOUSE_FOR_RENT' ? 'House' : 'Land'}`,
+      manageCat === 'HOUSE_FOR_RENT'
+    );
+  }
+
+  function handleDeleteCustomField(cat: CategoryCode, fieldId: string) {
+    const nextCustom = (state.customFields[cat] ?? []).filter((f) => f.fieldId !== fieldId);
+    const nextOverrides = { ...(state.defaultOverrides[cat] ?? {}) };
+    delete nextOverrides[fieldId];
+    const nextState: SimulatorState = {
+      ...state,
+      customFields: { ...state.customFields, [cat]: nextCustom },
+      defaultOverrides: { ...state.defaultOverrides, [cat]: nextOverrides },
+    };
+    setState(nextState);
+    if (cat === 'HOUSE_FOR_RENT') {
+      setHouseForm((prev) => {
+        const copy = { ...prev };
+        delete copy[fieldId];
+        return copy;
+      });
+    } else {
+      setLandForm((prev) => {
+        const copy = { ...prev };
+        delete copy[fieldId];
+        return copy;
+      });
+    }
+    syncDefaultDraftsForCategory(cat, nextState);
+    showTopToast('Custom Field Removed', 'Existing saved TXT records and posters unchanged.', cat === 'HOUSE_FOR_RENT');
+  }
+
   function handleSubmit(category: CategoryCode, e: React.FormEvent) {
     e.preventDefault();
     if (submittingCategory !== null) return;
 
     const isHouse = category === 'HOUSE_FOR_RENT';
-    const configs = getFieldsForCategory(category);
+    const catCustom = state.customFields[category] ?? [];
+    const catOverrides = state.defaultOverrides[category] ?? {};
+    const configs = getFieldsForCategory(category, catCustom, catOverrides);
     const currentForm = isHouse ? houseForm : landForm;
     const errors: Record<string, string> = {};
 
@@ -272,8 +488,17 @@ export default function App() {
     else setLandErrors({});
     setSubmittingCategory(category);
 
-    const fieldValues = configs.map((cfg) => currentForm[cfg.fieldId]);
-    const titleVal = (currentForm.title?.plainText ?? '').trim() || getDefaultTitle(category);
+    const fieldValues = configs.map(
+      (cfg) =>
+        currentForm[cfg.fieldId] ?? {
+          fieldId: cfg.fieldId,
+          label: cfg.label,
+          plainText: '',
+          segments: [],
+        }
+    );
+    const titleVal =
+      (currentForm.title?.plainText ?? '').trim() || getDefaultTitle(category, catOverrides);
     const mobileVal = (currentForm.mobile?.plainText ?? '').trim();
 
     const dateStr = activeLocalDate || getLocalDateStr();
@@ -289,7 +514,7 @@ export default function App() {
       category,
       title: titleVal,
       mobile: mobileVal,
-      details: buildHumanReadableSummary(category, fieldValues),
+      details: buildHumanReadableSummary(category, fieldValues, catCustom),
       fieldValues,
       sourceFileName: fileName,
     };
@@ -297,21 +522,23 @@ export default function App() {
     const existingTxt = isHouse ? state.houseFiles[fileName] ?? '' : state.landFiles[fileName] ?? '';
     const updatedTxt = appendRecord(existingTxt, newRecord);
 
-    // Clear form right after TXT save succeeds (matches Android TXT-first pipeline)
+    // Clear form to effective defaults right after TXT save succeeds (matches Android TXT-first pipeline)
     if (isHouse) {
-      setHouseForm(createInitialFormMap('HOUSE_FOR_RENT'));
+      setHouseForm(createInitialFormMap('HOUSE_FOR_RENT', catCustom, catOverrides));
       setHouseResetToken((n) => n + 1);
     } else {
-      setLandForm(createInitialFormMap('LAND_FOR_SALE'));
+      setLandForm(createInitialFormMap('LAND_FOR_SALE', catCustom, catOverrides));
       setLandResetToken((n) => n + 1);
     }
 
-    window.setTimeout(async () => {
+    window.requestAnimationFrame(async () => {
       await ensurePosterFontsLoaded();
       let generatedPoster: PosterEntry | null = null;
+      let didOverflow = false;
       if (state.autoJpgOnSubmit) {
         const posterName = buildPosterFileName(category, recordId);
         const rendered = renderDynamicPoster(newRecord);
+        didOverflow = rendered.overflowed;
         generatedPoster = {
           recordId,
           fileName: posterName,
@@ -344,16 +571,20 @@ export default function App() {
       setSelectedTxtFile({ category, fileName });
       setSubmittingCategory(null);
 
-      showTopToast(
-        generatedPoster
-          ? 'Property saved and poster generated successfully!'
-          : `${recordId} Saved to TXT`,
-        generatedPoster
-          ? `${recordId} • ${generatedPoster.fileName}`
-          : `Property Hub/${isHouse ? 'House for Rent' : 'Land for Sale'}/${fileName}`,
-        isHouse
-      );
-    }, 180);
+      if (generatedPoster && didOverflow) {
+        setOverflowWarningPoster(generatedPoster);
+      } else {
+        showTopToast(
+          generatedPoster
+            ? 'Property saved and poster generated successfully!'
+            : `${recordId} Saved to TXT`,
+          generatedPoster
+            ? `${recordId} • ${generatedPoster.fileName}`
+            : `Property Hub/${isHouse ? 'House for Rent' : 'Land for Sale'}/${fileName}`,
+          isHouse
+        );
+      }
+    });
   }
 
   function handleConfirmDelete() {
@@ -413,7 +644,11 @@ export default function App() {
       ...prev,
       posters: { ...prev.posters, [`${poster.category}|${poster.recordId}`]: updated },
     }));
-    showTopToast('Poster Regenerated', poster.fileName, poster.category === 'HOUSE_FOR_RENT');
+    if (rendered.overflowed) {
+      setOverflowWarningPoster(updated);
+    } else {
+      showTopToast('Poster Regenerated', poster.fileName, poster.category === 'HOUSE_FOR_RENT');
+    }
   }
 
   async function handleSharePoster(poster: PosterEntry) {
@@ -687,10 +922,19 @@ export default function App() {
       : state.landFiles[selectedTxtFile.fileName]
     : null;
 
-  const currentConfigs = getFieldsForCategory(activeCategory);
+  const currentConfigs = getFieldsForCategory(
+    activeCategory,
+    state.customFields[activeCategory] ?? [],
+    state.defaultOverrides[activeCategory] ?? {}
+  );
   const currentForm = activeCategory === 'HOUSE_FOR_RENT' ? houseForm : landForm;
   const currentErrors = activeCategory === 'HOUSE_FOR_RENT' ? houseErrors : landErrors;
   const currentResetToken = activeCategory === 'HOUSE_FOR_RENT' ? houseResetToken : landResetToken;
+  const manageFieldsList = getFieldsForCategory(
+    manageCat,
+    state.customFields[manageCat] ?? [],
+    state.defaultOverrides[manageCat] ?? {}
+  );
 
   return (
     <div className="min-h-screen bg-[#EEF3FB] text-[#0B1F44]">
@@ -824,36 +1068,46 @@ export default function App() {
                     >
                       <section className={`overflow-hidden rounded-[20px] border shadow-sm ${cardSurface}`}>
                         <div
-                          className={`flex h-[74px] items-center px-4 text-white ${
+                          className={`flex h-[74px] items-center justify-between px-4 text-white ${
                             activeCategory === 'HOUSE_FOR_RENT'
                               ? 'bg-gradient-to-r from-[#06328E] to-[#1565C0]'
                               : 'bg-gradient-to-r from-[#007E2F] to-[#14AE47]'
                           }`}
                         >
-                          {activeCategory === 'HOUSE_FOR_RENT' ? (
-                            <Home className="h-7 w-7" />
-                          ) : (
-                            <MapPin className="h-7 w-7" />
-                          )}
-                          <div className="mx-3 h-9 w-px bg-white/40" />
-                          <div>
-                            <h2 className="text-[16px] font-bold tracking-wide">
-                              {activeCategory === 'HOUSE_FOR_RENT'
-                                ? 'HOUSE FOR RENT'
-                                : 'LAND FOR SALE'}
-                            </h2>
-                            <p
-                              className={`text-[12px] ${
-                                activeCategory === 'HOUSE_FOR_RENT'
-                                  ? 'text-[#D7E4FF]'
-                                  : 'text-[#E3FFE9]'
-                              }`}
-                            >
-                              {activeCategory === 'HOUSE_FOR_RENT'
-                                ? 'Find the right tenant'
-                                : 'Sell Your Land Easily'}
-                            </p>
+                          <div className="flex items-center">
+                            {activeCategory === 'HOUSE_FOR_RENT' ? (
+                              <Home className="h-7 w-7 shrink-0" />
+                            ) : (
+                              <MapPin className="h-7 w-7 shrink-0" />
+                            )}
+                            <div className="mx-3 h-9 w-px bg-white/40" />
+                            <div>
+                              <h2 className="text-[16px] font-bold tracking-wide">
+                                {activeCategory === 'HOUSE_FOR_RENT'
+                                  ? 'HOUSE FOR RENT'
+                                  : 'LAND FOR SALE'}
+                              </h2>
+                              <p
+                                className={`text-[12px] ${
+                                  activeCategory === 'HOUSE_FOR_RENT'
+                                    ? 'text-[#D7E4FF]'
+                                    : 'text-[#E3FFE9]'
+                                }`}
+                              >
+                                {activeCategory === 'HOUSE_FOR_RENT'
+                                  ? 'Find the right tenant'
+                                  : 'Sell Your Land Easily'}
+                              </p>
+                            </div>
                           </div>
+                          <button
+                            type="button"
+                            onClick={() => openFieldsManager(activeCategory)}
+                            className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/40 bg-white/15 px-2.5 text-[11px] font-bold text-white hover:bg-white/25"
+                          >
+                            <SlidersHorizontal className="h-3.5 w-3.5" />
+                            <span>Fields</span>
+                          </button>
                         </div>
 
                         <form
@@ -974,6 +1228,21 @@ export default function App() {
                         />
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={() => openFieldsManager(activeCategory)}
+                      className={`flex w-full items-center gap-3 rounded-2xl border p-3.5 text-left transition-colors hover:border-blue-500 ${cardSurface}`}
+                    >
+                      <SlidersHorizontal className="h-7 w-7 shrink-0 text-blue-600" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[14px] font-bold">Form Fields & Defaults</p>
+                        <p className="text-[11.5px] opacity-75">
+                          Set per-field default values or add dynamic custom input fields.
+                        </p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 opacity-50" />
+                    </button>
 
                     <div className={`rounded-2xl border p-3.5 ${cardSurface}`}>
                       <div className="flex items-center gap-3">
@@ -1135,11 +1404,15 @@ export default function App() {
                                                 [`${rec.category}|${rec.recordId}`]: entry,
                                               },
                                             }));
-                                            showTopToast(
-                                              'Poster Generated',
-                                              entry.fileName,
-                                              rec.category === 'HOUSE_FOR_RENT'
-                                            );
+                                            if (rendered.overflowed) {
+                                              setOverflowWarningPoster(entry);
+                                            } else {
+                                              showTopToast(
+                                                'Poster Generated',
+                                                entry.fileName,
+                                                rec.category === 'HOUSE_FOR_RENT'
+                                              );
+                                            }
                                           }}
                                           className="font-semibold text-blue-600 hover:underline"
                                         >
@@ -1763,6 +2036,356 @@ export default function App() {
                 className="h-9 rounded-lg bg-[#0B41AD] px-4 text-xs font-semibold text-white"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manage Fields & Per-Field Defaults Modal */}
+      {manageFieldsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="flex max-h-[88vh] w-full max-w-xl flex-col rounded-2xl bg-white p-5 text-[#0B1F44] shadow-2xl">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-base font-bold">Form Fields &amp; Defaults</h3>
+                <p className="text-xs text-slate-500">
+                  Customize defaults per field or add dynamic input fields. Existing drafts and saved
+                  TXT records/posters remain untouched.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setManageFieldsOpen(false)}
+                className="rounded-full p-1.5 text-slate-500 hover:bg-slate-100"
+                aria-label="Close Fields Manager"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {(['HOUSE_FOR_RENT', 'LAND_FOR_SALE'] as CategoryCode[]).map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => {
+                    setManageCat(cat);
+                    syncDefaultDraftsForCategory(cat);
+                  }}
+                  className={`h-9 rounded-xl text-xs font-bold transition-colors ${
+                    manageCat === cat
+                      ? cat === 'HOUSE_FOR_RENT'
+                        ? 'bg-[#0B41AD] text-white'
+                        : 'bg-[#0B8A38] text-white'
+                      : 'bg-slate-100 text-slate-600'
+                  }`}
+                >
+                  {cat === 'HOUSE_FOR_RENT' ? 'House for Rent' : 'Land for Sale'}
+                </button>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              onClick={openAddCustomFieldModal}
+              className={`mt-3 flex h-10 w-full shrink-0 items-center justify-center gap-1.5 rounded-xl text-xs font-bold text-white ${
+                manageCat === 'HOUSE_FOR_RENT' ? 'bg-[#0B41AD]' : 'bg-[#0B8A38]'
+              }`}
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add New Input Field</span>
+            </button>
+
+            <div className="mt-3 min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
+              {manageFieldsList.map((cfg) => {
+                const hasOverride = Object.prototype.hasOwnProperty.call(
+                  state.defaultOverrides[manageCat] ?? {},
+                  cfg.fieldId
+                );
+                const draftVal = defaultDrafts[cfg.fieldId] ?? cfg.defaultValue;
+                return (
+                  <div
+                    key={`${manageCat}-${cfg.fieldId}`}
+                    className="rounded-xl border border-slate-200 bg-slate-50 p-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-slate-800">
+                        {cfg.label}{' '}
+                        <span
+                          className={`ml-1 rounded px-1.5 py-0.5 text-[10px] ${
+                            cfg.required
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {cfg.required ? 'Required' : 'Optional'}
+                        </span>
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        {cfg.custom ? 'Custom · ' : ''}
+                        {cfg.inputType === 'MULTILINE'
+                          ? 'Multiline'
+                          : cfg.inputType === 'NUMBER'
+                            ? 'Number'
+                            : cfg.inputType === 'PHONE'
+                              ? 'Phone'
+                              : 'Text'}
+                      </span>
+                    </div>
+
+                    {cfg.inputType === 'MULTILINE' ? (
+                      <textarea
+                        rows={2}
+                        value={draftVal}
+                        onChange={(e) =>
+                          setDefaultDrafts((prev) => ({
+                            ...prev,
+                            [cfg.fieldId]: e.target.value,
+                          }))
+                        }
+                        placeholder="Default value (leave blank for empty)"
+                        className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs focus:border-blue-600 focus:outline-none"
+                      />
+                    ) : (
+                      <input
+                        type={cfg.inputType === 'PHONE' ? 'tel' : 'text'}
+                        value={draftVal}
+                        onChange={(e) =>
+                          setDefaultDrafts((prev) => ({
+                            ...prev,
+                            [cfg.fieldId]: e.target.value,
+                          }))
+                        }
+                        placeholder="Default value (leave blank for empty)"
+                        className="mt-2 h-9 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs focus:border-blue-600 focus:outline-none"
+                      />
+                    )}
+
+                    <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleSaveFieldDefault(manageCat, cfg.fieldId, draftVal)}
+                        className="rounded-lg border border-blue-600 px-2.5 py-1 text-[11px] font-bold text-blue-600 hover:bg-blue-50"
+                      >
+                        Save Default
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveFieldDefault(manageCat, cfg.fieldId, '', true)}
+                        className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-200"
+                      >
+                        Clear
+                      </button>
+                      {!cfg.custom && hasOverride && (
+                        <button
+                          type="button"
+                          onClick={() => handleResetFieldDefault(manageCat, cfg.fieldId)}
+                          className="rounded-lg px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-200"
+                        >
+                          Reset
+                        </button>
+                      )}
+                      {cfg.custom && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteCustomField(manageCat, cfg.fieldId)}
+                          className="rounded-lg px-2 py-1 text-[11px] font-bold text-red-600 hover:bg-red-50"
+                        >
+                          Delete
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add Custom Field Modal (explicit unselected Required vs Optional choice) */}
+      {addFieldModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-4">
+          <form
+            onSubmit={handleCreateCustomField}
+            className="w-full max-w-md rounded-2xl bg-white p-5 text-[#0B1F44] shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div>
+                <h3 className="text-base font-bold">Add Custom Input Field</h3>
+                <p className="text-xs text-slate-500">
+                  Category: {manageCat === 'HOUSE_FOR_RENT' ? 'House for Rent' : 'Land for Sale'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAddFieldModalOpen(false)}
+                className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                aria-label="Cancel Add Field"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700">
+                  Field Name / Label *
+                </label>
+                <input
+                  type="text"
+                  value={newFieldLabel}
+                  onChange={(e) => {
+                    setNewFieldLabel(e.target.value);
+                    if (newFieldError) setNewFieldError(null);
+                  }}
+                  placeholder="e.g. ফ্লোর নম্বর, গ্যারেজ সুবিধা, রাস্তার প্রস্থ"
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:border-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700">
+                  Default Value (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={newFieldDefault}
+                  onChange={(e) => setNewFieldDefault(e.target.value)}
+                  placeholder="Leave blank if no preset value needed"
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-300 px-3 text-xs focus:border-blue-600 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700">Input Type</label>
+                <select
+                  value={newFieldType}
+                  onChange={(e) => setNewFieldType(e.target.value as FieldInputType)}
+                  className="mt-1 h-9 w-full rounded-lg border border-slate-300 bg-white px-2.5 text-xs focus:border-blue-600 focus:outline-none"
+                >
+                  <option value="SINGLE_LINE">Single Line Text</option>
+                  <option value="MULTILINE">Multiline Text</option>
+                  <option value="NUMBER">Number</option>
+                  <option value="PHONE">Phone</option>
+                </select>
+              </div>
+
+              <div>
+                <span className="block text-xs font-bold text-slate-700">
+                  Field Requirement (Select One) *
+                </span>
+                <div className="mt-1.5 grid grid-cols-2 gap-2">
+                  <label
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      newFieldRequired === true
+                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                        : 'border-slate-300 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="custom_field_req_choice"
+                      checked={newFieldRequired === true}
+                      onChange={() => {
+                        setNewFieldRequired(true);
+                        setNewFieldError(null);
+                      }}
+                    />
+                    <span>Required</span>
+                  </label>
+                  <label
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                      newFieldRequired === false
+                        ? 'border-blue-600 bg-blue-50 text-blue-700'
+                        : 'border-slate-300 text-slate-700'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="custom_field_req_choice"
+                      checked={newFieldRequired === false}
+                      onChange={() => {
+                        setNewFieldRequired(false);
+                        setNewFieldError(null);
+                      }}
+                    />
+                    <span>Optional</span>
+                  </label>
+                </div>
+              </div>
+
+              {newFieldError && (
+                <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">
+                  {newFieldError}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setAddFieldModalOpen(false)}
+                className="h-9 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className={`h-9 rounded-lg px-4 text-xs font-bold text-white ${
+                  manageCat === 'HOUSE_FOR_RENT' ? 'bg-[#0B41AD]' : 'bg-[#0B8A38]'
+                }`}
+              >
+                Add Field
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Max Poster Height (2560px) Overflow Warning Modal */}
+      {overflowWarningPoster && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 text-[#0B1F44] shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-2.5">
+                <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                <div>
+                  <h3 className="text-base font-bold">
+                    Max Poster Height Reached ({overflowWarningPoster.width}×
+                    {overflowWarningPoster.height}px)
+                  </h3>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    TXT record <span className="font-mono font-bold">{overflowWarningPoster.recordId}</span>{' '}
+                    saved cleanly, but poster content exceeded the 2560px maximum height even after
+                    spacing and font optimization. Consider shortening lengthy details slightly.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOverflowWarningPoster(null)}
+                className="rounded-full p-1 text-slate-500 hover:bg-slate-100"
+                aria-label="Close Overflow Warning"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-3 max-h-[56vh] overflow-y-auto rounded-xl border border-slate-200 bg-slate-100 p-2">
+              <img
+                src={overflowWarningPoster.dataUrl}
+                alt={overflowWarningPoster.fileName}
+                className="h-auto w-full rounded-lg object-contain"
+              />
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setOverflowWarningPoster(null)}
+                className="h-9 rounded-lg bg-[#0B41AD] px-4 text-xs font-semibold text-white"
+              >
+                Review Complete
               </button>
             </div>
           </div>

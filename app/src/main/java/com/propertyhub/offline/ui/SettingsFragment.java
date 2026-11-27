@@ -56,6 +56,7 @@ public class SettingsFragment extends Fragment {
 
         ImageButton btnBackArrow = view.findViewById(R.id.btnSettingsBackArrow);
         View cardStorage = view.findViewById(R.id.cardStorageLocation);
+        View cardFormFieldsDefaults = view.findViewById(R.id.cardFormFieldsDefaults);
         View cardTheme = view.findViewById(R.id.cardAppTheme);
         View cardLanguage = view.findViewById(R.id.cardLanguage);
         Button btnBackHome = view.findViewById(R.id.btnBackToHome);
@@ -84,6 +85,22 @@ public class SettingsFragment extends Fragment {
         });
 
         cardStorage.setOnClickListener(v -> onChangeStorageClicked());
+
+        cardFormFieldsDefaults.setOnClickListener(v -> {
+            if (host == null) {
+                return;
+            }
+            FieldCustomizationDialogHelper.show(
+                    requireContext(),
+                    host.getSettingsManager(),
+                    com.propertyhub.offline.model.PropertyCategory.HOUSE_FOR_RENT,
+                    () -> {
+                        if (host != null) {
+                            host.notifyFieldsUpdated();
+                        }
+                    }
+            );
+        });
 
         switchAutoJpg.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (host != null && buttonView.isPressed()) {

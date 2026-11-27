@@ -51,7 +51,7 @@ public class PosterRenderer {
                 overflowed = LandPosterTemplate.render(appContext, canvas, record, plan);
             }
 
-            ByteArrayOutputStream out = new ByteArrayOutputStream(384 * 1024);
+            ByteArrayOutputStream out = new ByteArrayOutputStream(512 * 1024);
             boolean compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out);
             if (!compressed) {
                 return PosterRenderResult.error("JPEG compression failed.");

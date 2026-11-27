@@ -1,6 +1,7 @@
 package com.propertyhub.offline.poster;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
@@ -18,22 +19,55 @@ import androidx.annotation.Nullable;
 import com.propertyhub.offline.model.PropertyFieldValue;
 import com.propertyhub.offline.model.PropertyRecord;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Reference Image 2 Exact Land for Sale Poster Template (Dynamic Auto Height).
  * Dark Green + White design featuring:
  * - Single clean green rounded outer border
  * - Top location pin over curved contour arcs + 2 flanking trees + tapered horizontal bars
- * - Large dark-green rounded title banner with white title.ttf text
+ * - Large dark-green rounded title banner with title font
  * - Central green-bordered panel (left lush green pasture illustration + vertical divider + right text)
  * - Optional separate green-bordered Dag | Khatian pill row below
  * - Optional Additional Information text cleanly below Dag/Khatian row
- * - Bottom dark-green contact banner with white phone badge, separator, and contact number
+ * - Bottom dark-green contact banner with white phone badge, separator, and contact font
  */
 public final class LandPosterTemplate {
 
+    private static final int HEADER_BITMAP_HEIGHT = 136;
+    private static final Object CACHE_LOCK = new Object();
+    private static final Map<String, Bitmap> ASSET_CACHE = new LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Bitmap> eldest) {
+            return size() > 6;
+        }
+    };
+
+    private static final Path HANDSET_PATH = createHandsetPath();
+
     private LandPosterTemplate() {
+    }
+
+    private static Path createHandsetPath() {
+        Path handset = new Path();
+        handset.moveTo(-22f, -34f);
+        handset.quadTo(-34f, -32f, -34f, -18f);
+        handset.cubicTo(-34f, 6f, -6f, 34f, 18f, 34f);
+        handset.quadTo(32f, 34f, 34f, 22f);
+        handset.lineTo(34f, 12f);
+        handset.quadTo(34f, 6f, 26f, 4f);
+        handset.lineTo(14f, 2f);
+        handset.quadTo(9f, 1f, 6f, 5f);
+        handset.lineTo(1f, 11f);
+        handset.quadTo(-8f, 6f, -11f, -1f);
+        handset.lineTo(-5f, -6f);
+        handset.quadTo(-1f, -9f, -2f, -14f);
+        handset.lineTo(-4f, -26f);
+        handset.quadTo(-6f, -34f, -12f, -34f);
+        handset.close();
+        return handset;
     }
 
     @NonNull
@@ -65,7 +99,7 @@ public final class LandPosterTemplate {
     ) {
         PosterThemeConfig theme = PosterThemeConfig.landForSale();
         int green = theme.getPrimaryColor();
-        Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
+        Typeface contactTypeface = PosterFontLoader.loadContactTypeface(context);
 
         // 1. Crisp White Canvas & Green Rounded Outer Border
         canvas.drawColor(theme.getCanvasBackgroundColor());
@@ -81,8 +115,9 @@ public final class LandPosterTemplate {
                 borderPaint
         );
 
-        // 2. Top Location Pin + Curved Contours + Flanking Trees + Tapered Bars
-        drawTopLandHeaderEmblem(canvas, plan.width, plan.headerTop, green);
+        // 2. Top Location Pin + Curved Contours + Flanking Trees + Tapered Bars (cached bitmap)
+        Bitmap headerBitmap = getOrCreateTopHeaderBitmap(plan.width, green);
+        canvas.drawBitmap(headerBitmap, 0f, plan.headerTop, null);
 
         Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         fillPaint.setStyle(Paint.Style.FILL);
@@ -121,7 +156,8 @@ public final class LandPosterTemplate {
                 borderPaint
         );
 
-        drawLandPastureScene(canvas, plan.illustRect, green);
+        Bitmap pastureBitmap = getOrCreatePastureBitmap(plan.illustRect.width(), plan.illustRect.height(), green);
+        canvas.drawBitmap(pastureBitmap, plan.illustRect.left, plan.illustRect.top, null);
 
         if (plan.hasMainFields) {
             Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -273,8 +309,9 @@ public final class LandPosterTemplate {
 
         TextPaint mobilePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mobilePaint.setColor(Color.WHITE);
-        mobilePaint.setTypeface(Typeface.create(titleTypeface, Typeface.BOLD));
-        mobilePaint.setFakeBoldText(true);
+        Typeface contactStyled = PosterFontLoader.getStyledVariant(contactTypeface, true, false);
+        mobilePaint.setTypeface(contactStyled);
+        mobilePaint.setFakeBoldText(!contactStyled.isBold());
         mobilePaint.setTextAlign(Paint.Align.CENTER);
         float fittedContactSize = PosterTextFitter.fitSingleLineTextSize(
                 contactLine,
@@ -294,6 +331,40 @@ public final class LandPosterTemplate {
         );
 
         return plan.overflowed;
+    }
+
+    @NonNull
+    private static Bitmap getOrCreateTopHeaderBitmap(int width, int green) {
+        String key = "land_header_" + width + "_" + green;
+        synchronized (CACHE_LOCK) {
+            Bitmap cached = ASSET_CACHE.get(key);
+            if (cached != null && !cached.isRecycled()) {
+                return cached;
+            }
+            Bitmap bmp = Bitmap.createBitmap(width, HEADER_BITMAP_HEIGHT, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            drawTopLandHeaderEmblem(c, width, 0f, green);
+            ASSET_CACHE.put(key, bmp);
+            return bmp;
+        }
+    }
+
+    @NonNull
+    private static Bitmap getOrCreatePastureBitmap(float widthF, float heightF, int darkGreen) {
+        int w = Math.max(40, Math.round(widthF));
+        int h = Math.max(40, Math.round(heightF));
+        String key = "land_pasture_" + w + "x" + h + "_" + darkGreen;
+        synchronized (CACHE_LOCK) {
+            Bitmap cached = ASSET_CACHE.get(key);
+            if (cached != null && !cached.isRecycled()) {
+                return cached;
+            }
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            drawLandPastureScene(c, new RectF(0f, 0f, w, h), darkGreen);
+            ASSET_CACHE.put(key, bmp);
+            return bmp;
+        }
     }
 
     private static void drawTopLandHeaderEmblem(
@@ -606,25 +677,7 @@ public final class LandPosterTemplate {
         canvas.save();
         canvas.translate(cx, cy);
         canvas.scale(s, s);
-
-        Path handset = new Path();
-        handset.moveTo(-22f, -34f);
-        handset.quadTo(-34f, -32f, -34f, -18f);
-        handset.cubicTo(-34f, 6f, -6f, 34f, 18f, 34f);
-        handset.quadTo(32f, 34f, 34f, 22f);
-        handset.lineTo(34f, 12f);
-        handset.quadTo(34f, 6f, 26f, 4f);
-        handset.lineTo(14f, 2f);
-        handset.quadTo(9f, 1f, 6f, 5f);
-        handset.lineTo(1f, 11f);
-        handset.quadTo(-8f, 6f, -11f, -1f);
-        handset.lineTo(-5f, -6f);
-        handset.quadTo(-1f, -9f, -2f, -14f);
-        handset.lineTo(-4f, -26f);
-        handset.quadTo(-6f, -34f, -12f, -34f);
-        handset.close();
-
-        canvas.drawPath(handset, phonePaint);
+        canvas.drawPath(HANDSET_PATH, phonePaint);
         canvas.restore();
     }
 }

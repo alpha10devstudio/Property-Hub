@@ -7,10 +7,10 @@ import {
 } from './propertyCatalog';
 
 export const MIN_POSTER_HEIGHT = 480;
-export const MAX_POSTER_HEIGHT = 2160;
-const MIN_DYNAMIC_BODY_FONT_SIZE = 24;
-const MIN_LAND_ADDITIONAL_FONT_SIZE = 24;
-const MIN_LAND_DAG_FONT_SIZE = 28;
+export const MAX_POSTER_HEIGHT = 2560;
+const MIN_DYNAMIC_BODY_FONT_SIZE = 22;
+const MIN_LAND_ADDITIONAL_FONT_SIZE = 22;
+const MIN_LAND_DAG_FONT_SIZE = 26;
 
 export interface RenderedPosterOutput {
   dataUrl: string;
@@ -27,6 +27,77 @@ interface RichRun {
 }
 
 let fontsLoadPromise: Promise<void> | null = null;
+let hasDedicatedContactFont = false;
+
+let sharedMeasureCanvas: HTMLCanvasElement | null = null;
+let sharedMeasureCtx: CanvasRenderingContext2D | null = null;
+const textWidthCache = new Map<string, number>();
+const illustrationCache = new Map<string, HTMLCanvasElement>();
+
+function getMeasureContext(): CanvasRenderingContext2D | null {
+  if (sharedMeasureCtx) return sharedMeasureCtx;
+  if (typeof document === 'undefined') return null;
+  sharedMeasureCanvas = document.createElement('canvas');
+  sharedMeasureCanvas.width = 1440;
+  sharedMeasureCanvas.height = 100;
+  sharedMeasureCtx = sharedMeasureCanvas.getContext('2d');
+  return sharedMeasureCtx;
+}
+
+function measureWidthCached(
+  ctx: CanvasRenderingContext2D,
+  font: string,
+  text: string
+): number {
+  const key = `${font}|${text}`;
+  const hit = textWidthCache.get(key);
+  if (hit !== undefined) return hit;
+  if (ctx.font !== font) ctx.font = font;
+  const w = ctx.measureText(text).width;
+  if (textWidthCache.size > 4000) {
+    textWidthCache.clear();
+  }
+  textWidthCache.set(key, w);
+  return w;
+}
+
+function cacheIllustration(key: string, canvas: HTMLCanvasElement) {
+  if (illustrationCache.size >= 10) {
+    const firstKey = illustrationCache.keys().next().value;
+    if (firstKey !== undefined) illustrationCache.delete(firstKey);
+  }
+  illustrationCache.set(key, canvas);
+}
+
+async function tryLoadOptionalFont(family: string, urls: string[]): Promise<boolean> {
+  if (typeof FontFace === 'undefined' || typeof fetch === 'undefined') return false;
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const contentType = (res.headers.get('content-type') || '').toLowerCase();
+      if (contentType.includes('text/html')) continue;
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength < 12) continue;
+      const magic = new DataView(buf).getUint32(0, false);
+      // Valid TTF (0x00010000), OTF ('OTTO' = 0x4F54544F), true (0x74727565), or WOFF/WOFF2
+      const validHeader =
+        magic === 0x00010000 ||
+        magic === 0x4f54544f ||
+        magic === 0x74727565 ||
+        magic === 0x774f4646 ||
+        magic === 0x774f4632;
+      if (!validHeader) continue;
+      const face = new FontFace(family, buf);
+      const loaded = await face.load();
+      document.fonts.add(loaded);
+      return true;
+    } catch {
+      // Try next candidate
+    }
+  }
+  return false;
+}
 
 export function ensurePosterFontsLoaded(): Promise<void> {
   if (fontsLoadPromise) return fontsLoadPromise;
@@ -47,11 +118,17 @@ export function ensurePosterFontsLoaded(): Promise<void> {
           }),
           paraFace.load().then((loaded) => {
             document.fonts.add(loaded);
-          })
+          }),
+          tryLoadOptionalFont('PosterContact', ['/fonts/contact.ttf', '/fonts/contact.otf']).then(
+            (loaded) => {
+              hasDedicatedContactFont = loaded;
+            }
+          )
         );
       }
       await Promise.allSettled(loaders);
       await document.fonts.ready;
+      textWidthCache.clear();
     } catch {
       // Fall back gracefully if FontFace loading fails in restricted environments
     }
@@ -69,17 +146,12 @@ function buildBodyFont(size: number, bold: boolean, italic: boolean): string {
   return `${style}${size}px "PosterParagraph", "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
 }
 
-/**
- * Wraps rich text segments (supporting newlines, bold, italic, and long unspaced words)
- * inside maxWidth without clipping or horizontal overflow.
- */
-function wrapRichRuns(
-  ctx: CanvasRenderingContext2D,
-  runs: RichRun[],
-  maxWidth: number,
-  fontSize: number,
-  boldLabels = true
-): RichRun[][] {
+function buildContactFont(size: number): string {
+  const primaryFamily = hasDedicatedContactFont ? '"PosterContact", "PosterTitle"' : '"PosterTitle"';
+  return `bold ${size}px ${primaryFamily}, "Noto Sans Bengali", "Plus Jakarta Sans", sans-serif`;
+}
+
+function splitRunsIntoParagraphTokens(runs: RichRun[], boldLabels = true): RichRun[][] {
   const paragraphs: RichRun[][] = [[]];
   for (const run of runs) {
     const parts = run.text.split(/\r?\n/);
@@ -97,34 +169,47 @@ function wrapRichRuns(
       }
     });
   }
-
-  const lines: RichRun[][] = [];
-  for (const para of paragraphs) {
-    if (para.length === 0) {
-      continue;
-    }
-
+  return paragraphs.map((para) => {
     const tokens: RichRun[] = [];
     for (const seg of para) {
       for (const chunk of seg.text.split(/(\s+)/)) {
-        if (!chunk) continue;
-        ctx.font = buildBodyFont(fontSize, seg.bold, seg.italic);
-        if (ctx.measureText(chunk).width <= maxWidth || /^\s+$/.test(chunk)) {
-          tokens.push({ ...seg, text: chunk });
-        } else {
-          // Break oversized single word character-by-character so it never clips horizontally
-          let buf = '';
-          for (const ch of Array.from(chunk)) {
-            const candidate = buf + ch;
-            if (buf && ctx.measureText(candidate).width > maxWidth) {
-              tokens.push({ ...seg, text: buf });
-              buf = ch;
-            } else {
-              buf = candidate;
-            }
+        if (chunk) tokens.push({ ...seg, text: chunk });
+      }
+    }
+    return tokens;
+  });
+}
+
+/**
+ * Wraps pre-tokenized rich text paragraphs inside maxWidth using cached font width measurements.
+ */
+function wrapPrebuiltParagraphs(
+  ctx: CanvasRenderingContext2D,
+  paragraphs: RichRun[][],
+  maxWidth: number,
+  fontSize: number
+): RichRun[][] {
+  const lines: RichRun[][] = [];
+  for (const rawTokens of paragraphs) {
+    if (rawTokens.length === 0) continue;
+
+    const tokens: RichRun[] = [];
+    for (const chunkTok of rawTokens) {
+      const font = buildBodyFont(fontSize, chunkTok.bold, chunkTok.italic);
+      if (/^\s+$/.test(chunkTok.text) || measureWidthCached(ctx, font, chunkTok.text) <= maxWidth) {
+        tokens.push(chunkTok);
+      } else {
+        let buf = '';
+        for (const ch of Array.from(chunkTok.text)) {
+          const candidate = buf + ch;
+          if (buf && measureWidthCached(ctx, font, candidate) > maxWidth) {
+            tokens.push({ ...chunkTok, text: buf });
+            buf = ch;
+          } else {
+            buf = candidate;
           }
-          if (buf) tokens.push({ ...seg, text: buf });
         }
+        if (buf) tokens.push({ ...chunkTok, text: buf });
       }
     }
 
@@ -134,8 +219,8 @@ function wrapRichRuns(
     for (const tok of tokens) {
       const isWs = /^\s+$/.test(tok.text);
       if (currentLine.length === 0 && isWs) continue;
-      ctx.font = buildBodyFont(fontSize, tok.bold, tok.italic);
-      const tokWidth = ctx.measureText(tok.text).width;
+      const font = buildBodyFont(fontSize, tok.bold, tok.italic);
+      const tokWidth = measureWidthCached(ctx, font, tok.text);
 
       if (currentWidth + tokWidth <= maxWidth || currentLine.length === 0) {
         currentLine.push(tok);
@@ -164,7 +249,6 @@ function wrapRichRuns(
       lines.push(currentLine);
     }
   }
-
   return lines;
 }
 
@@ -174,14 +258,14 @@ function wrapPlainTitleLines(
   maxWidth: number,
   fontSize: number
 ): string[] {
-  ctx.font = buildTitleFont(fontSize);
+  const font = buildTitleFont(fontSize);
   const words = text.trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [''];
   const lines: string[] = [];
   let current = '';
   for (const w of words) {
     const candidate = current ? `${current} ${w}` : w;
-    if (ctx.measureText(candidate).width <= maxWidth || !current) {
+    if (measureWidthCached(ctx, font, candidate) <= maxWidth || !current) {
       current = candidate;
     } else {
       lines.push(current);
@@ -262,8 +346,8 @@ function measureRichLineWidth(
 ): number {
   let width = 0;
   for (const tok of line) {
-    ctx.font = buildBodyFont(fontSize, tok.bold, tok.italic);
-    width += ctx.measureText(tok.text).width + (tok.bold ? Math.max(1.5, fontSize * 0.035) : 0);
+    const font = buildBodyFont(fontSize, tok.bold, tok.italic);
+    width += measureWidthCached(ctx, font, tok.text) + (tok.bold ? Math.max(1.5, fontSize * 0.035) : 0);
   }
   return width;
 }
@@ -762,15 +846,101 @@ function drawLandPastureScene(
   ctx.restore();
 }
 
+function drawHouseTopRoofHeaderCached(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  topY: number,
+  navy: string
+) {
+  const key = `house_roof_${W}_${navy}`;
+  let sprite = illustrationCache.get(key);
+  if (!sprite) {
+    sprite = document.createElement('canvas');
+    sprite.width = W;
+    sprite.height = 144;
+    const sctx = sprite.getContext('2d');
+    if (sctx) {
+      drawHouseTopRoofHeader(sctx, W, 0, navy);
+      cacheIllustration(key, sprite);
+    }
+  }
+  ctx.drawImage(sprite, 0, topY);
+}
+
+function drawHousePanelIllustrationCached(
+  ctx: CanvasRenderingContext2D,
+  centerX: number,
+  centerY: number,
+  maxW: number,
+  maxH: number,
+  navy: string
+) {
+  const scale = Math.min(0.95, Math.min((maxW - 24) / 310, (maxH - 20) / 330));
+  const boxW = Math.max(40, Math.ceil(336 * scale));
+  const boxH = Math.max(40, Math.ceil(350 * scale));
+  const key = `house_panel_${boxW}x${boxH}_${navy}`;
+  let sprite = illustrationCache.get(key);
+  if (!sprite) {
+    sprite = document.createElement('canvas');
+    sprite.width = boxW;
+    sprite.height = boxH;
+    const sctx = sprite.getContext('2d');
+    if (sctx) {
+      drawHousePanelIllustration(sctx, boxW / 2, boxH / 2, maxW, maxH, navy);
+      cacheIllustration(key, sprite);
+    }
+  }
+  ctx.drawImage(sprite, centerX - boxW / 2, centerY - boxH / 2);
+}
+
+function drawLandTopEmblemHeaderCached(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  topY: number,
+  green: string
+) {
+  const key = `land_roof_${W}_${green}`;
+  let sprite = illustrationCache.get(key);
+  if (!sprite) {
+    sprite = document.createElement('canvas');
+    sprite.width = W;
+    sprite.height = 136;
+    const sctx = sprite.getContext('2d');
+    if (sctx) {
+      drawLandTopEmblemHeader(sctx, W, 0, green);
+      cacheIllustration(key, sprite);
+    }
+  }
+  ctx.drawImage(sprite, 0, topY);
+}
+
+function drawLandPastureSceneCached(
+  ctx: CanvasRenderingContext2D,
+  box: { left: number; top: number; width: number; height: number },
+  darkGreen: string
+) {
+  const cw = Math.max(20, Math.round(box.width));
+  const ch = Math.max(20, Math.round(box.height));
+  const key = `land_pasture_${cw}x${ch}_${darkGreen}`;
+  let sprite = illustrationCache.get(key);
+  if (!sprite) {
+    sprite = document.createElement('canvas');
+    sprite.width = cw;
+    sprite.height = ch;
+    const sctx = sprite.getContext('2d');
+    if (sctx) {
+      drawLandPastureScene(sctx, { left: 0, top: 0, width: cw, height: ch }, darkGreen);
+      cacheIllustration(key, sprite);
+    }
+  }
+  ctx.drawImage(sprite, box.left, box.top, box.width, box.height);
+}
+
 export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutput {
   const W = 1440;
   const isHouse = record.category === 'HOUSE_FOR_RENT';
 
-  // Offscreen measurement canvas first so we calculate exact dynamic height BEFORE drawing
-  const measureCanvas = document.createElement('canvas');
-  measureCanvas.width = W;
-  measureCanvas.height = 100;
-  const mctx = measureCanvas.getContext('2d');
+  const mctx = getMeasureContext();
   if (!mctx) {
     return { dataUrl: '', width: W, height: 1080, overflowed: false };
   }
@@ -781,7 +951,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   const visibleFields = getPosterVisibleFieldValues(record);
   const titleText = (record.title || getDefaultTitle(record.category)).trim();
 
-  // Measure Title Banner (wraps gracefully if custom title is long)
+  // Title Banner: preserved at full readability; never shrunk unnecessarily for body length
   const titleMaxW = cardW - 110;
   let titleFontSize = isHouse ? 86 : 88;
   let titleLines = wrapPlainTitleLines(mctx, titleText, titleMaxW, titleFontSize);
@@ -801,9 +971,9 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   if (isHouse) {
     const NAVY = '#002868';
     const headerTop = 36;
-    const titleTop = headerTop + 144;
-    const titleBottom = titleTop + titleH;
-    const panelTop = titleBottom + 24;
+    let headerToTitleGap = 144;
+    let cardGap = 24;
+    let bottomMargin = 46;
 
     const illustPaneW = 316;
     const dividerX = cardLeft + illustPaneW;
@@ -811,7 +981,11 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     const textRight = cardRight - 34;
     const textMaxW = textRight - textLeft;
 
-    // Auto-size typography: expand panel height up to MAX_POSTER_HEIGHT, then shrink font/spacing before capping & flagging overflow
+    const preparedFields = visibleFields.map((fv) => ({
+      fv,
+      paragraphs: splitRunsIntoParagraphTokens(buildFieldInlineRuns(fv), false),
+    }));
+
     let fontSize = visibleFields.length <= 2 ? 48 : 44;
     if (visibleFields.reduce((acc, f) => acc + f.plainText.length, 0) > 500) {
       fontSize = 38;
@@ -821,8 +995,12 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     let padV = 34;
     const hasFields = visibleFields.length > 0;
     const minPanelH = hasFields ? 316 : 256;
-    const bottomReserve = 24 + contactH + 46;
+    let compressedSpacing = false;
 
+    let titleTop = headerTop + headerToTitleGap;
+    let titleBottom = titleTop + titleH;
+    let panelTop = titleBottom + cardGap;
+    let bottomReserve = cardGap + contactH + bottomMargin;
     let lineH = fontSize * lineMult;
     let measuredBlocks: Array<{ fv: PropertyFieldValue; lines: RichRun[][]; height: number }> = [];
     let textTotalH = 0;
@@ -830,11 +1008,15 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     let rawTotalHeight = 0;
 
     while (true) {
+      titleTop = headerTop + headerToTitleGap;
+      titleBottom = titleTop + titleH;
+      panelTop = titleBottom + cardGap;
+      bottomReserve = cardGap + contactH + bottomMargin;
+
       lineH = fontSize * lineMult;
-      measuredBlocks = visibleFields.map((fv) => {
-        const runs = buildFieldInlineRuns(fv);
-        const lines = wrapRichRuns(mctx, runs, textMaxW, fontSize, false);
-        return { fv, lines, height: lines.length * lineH };
+      measuredBlocks = preparedFields.map((pf) => {
+        const lines = wrapPrebuiltParagraphs(mctx, pf.paragraphs, textMaxW, fontSize);
+        return { fv: pf.fv, lines, height: lines.length * lineH };
       });
 
       textTotalH =
@@ -847,14 +1029,25 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       if (rawTotalHeight <= MAX_POSTER_HEIGHT) {
         break;
       }
-      if (fontSize > MIN_DYNAMIC_BODY_FONT_SIZE) {
-        fontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE, fontSize - 2);
-        fieldGap = Math.max(10, fieldGap - 1);
-        padV = Math.max(24, padV - 1);
-      } else if (lineMult > 1.16) {
-        lineMult = 1.16;
+      // Phase 1: Optimize vertical spacing & margins FIRST before shrinking fonts
+      if (!compressedSpacing) {
+        compressedSpacing = true;
+        headerToTitleGap = 136;
+        cardGap = 16;
         fieldGap = 10;
-        padV = 22;
+        padV = 20;
+        bottomMargin = 34;
+        continue;
+      }
+      // Phase 2: Adaptive body font reduction
+      if (fontSize > MIN_DYNAMIC_BODY_FONT_SIZE) {
+        const step = rawTotalHeight - MAX_POSTER_HEIGHT > 650 ? 4 : 2;
+        fontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE, fontSize - step);
+        fieldGap = Math.max(8, fieldGap - 1);
+      } else if (lineMult > 1.15) {
+        lineMult = 1.15;
+        fieldGap = 8;
+        padV = 18;
       } else {
         break;
       }
@@ -867,9 +1060,12 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     }
     const panelBottom = panelTop + panelH;
 
-    const contactTop = panelBottom + 24;
+    const contactTop = panelBottom + cardGap;
     const contactBottom = contactTop + contactH;
-    const totalHeight = Math.max(MIN_POSTER_HEIGHT, Math.min(MAX_POSTER_HEIGHT, Math.round(contactBottom + 46)));
+    const totalHeight = Math.max(
+      MIN_POSTER_HEIGHT,
+      Math.min(MAX_POSTER_HEIGHT, Math.round(contactBottom + bottomMargin))
+    );
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
@@ -887,8 +1083,8 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     ctx.roundRect(22, 22, W - 44, totalHeight - 44, 46);
     ctx.stroke();
 
-    // 2. Top Roof Silhouette Header
-    drawHouseTopRoofHeader(ctx, W, headerTop, NAVY);
+    // 2. Top Roof Silhouette Header (cached sprite)
+    drawHouseTopRoofHeaderCached(ctx, W, headerTop, NAVY);
 
     // 3. Navy Title Banner
     ctx.fillStyle = NAVY;
@@ -915,8 +1111,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     ctx.stroke();
 
     if (hasFields) {
-      // Left House Illustration Pane (centered vertically, aspect-preserved)
-      drawHousePanelIllustration(
+      drawHousePanelIllustrationCached(
         ctx,
         cardLeft + illustPaneW / 2,
         panelTop + panelH / 2,
@@ -925,7 +1120,6 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
         NAVY
       );
 
-      // Vertical Separator Line
       ctx.strokeStyle = NAVY;
       ctx.lineWidth = 4.5;
       ctx.lineCap = 'round';
@@ -934,7 +1128,6 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       ctx.lineTo(dividerX, panelBottom - 26);
       ctx.stroke();
 
-      // Right Text Pane (clipped cleanly inside panel bounds)
       ctx.save();
       ctx.beginPath();
       ctx.rect(dividerX + 6, panelTop + 14, cardRight - dividerX - 20, Math.max(0, panelH - 28));
@@ -955,8 +1148,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       }
       ctx.restore();
     } else {
-      // All optional body fields empty -> centered compact house illustration cleanly inside panel
-      drawHousePanelIllustration(
+      drawHousePanelIllustrationCached(
         ctx,
         W / 2,
         panelTop + panelH / 2,
@@ -966,7 +1158,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       );
     }
 
-    // 5. Bottom Navy Contact Banner
+    // 5. Bottom Navy Contact Banner (uses Contact Font slot)
     ctx.fillStyle = NAVY;
     ctx.beginPath();
     ctx.roundRect(cardLeft, contactTop, cardW, contactH, 44);
@@ -999,11 +1191,12 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     const contactRightMaxW = cardRight - 36 - (cDivX + 28);
     let contactFontSize = 78;
     while (contactFontSize > 42) {
-      ctx.font = buildTitleFont(contactFontSize);
-      if (ctx.measureText(contactStr).width <= contactRightMaxW) break;
+      if (measureWidthCached(ctx, buildContactFont(contactFontSize), contactStr) <= contactRightMaxW) {
+        break;
+      }
       contactFontSize -= 2;
     }
-    ctx.font = buildTitleFont(contactFontSize);
+    ctx.font = buildContactFont(contactFontSize);
     ctx.fillStyle = '#FFFFFF';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -1018,16 +1211,14 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   }
 
   // =========================================================================
-  // LAND FOR SALE — REFERENCE IMAGE 2 EXACT DESIGN + DYNAMIC HEIGHT
+  // LAND FOR SALE — REFERENCE IMAGE 2 EXACT DESIGN + DYNAMIC AUTO-HEIGHT
   // =========================================================================
   const GREEN = '#05661D';
   const DARK_GREEN_TEXT = '#045718';
   const headerTop = 34;
-  const titleTop = headerTop + 128;
-  const titleBottom = titleTop + titleH;
-  const panelTop = titleBottom + 20;
+  let headerToTitleGap = 128;
+  let panelGap = 20;
 
-  // Separate Dag, Khatian, and Additional Info per Reference Image 2 structure
   const dagField = visibleFields.find((f) => f.fieldId === 'dag_number');
   const khatianField = visibleFields.find((f) => f.fieldId === 'khatian_number');
   const additionalField = visibleFields.find((f) => f.fieldId === 'additional_info');
@@ -1038,11 +1229,10 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       f.fieldId !== 'additional_info'
   );
 
-  // Measure Main Central Panel + Dag/Khatian + Additional Info with shrink-to-fit & MAX_POSTER_HEIGHT cap
   const illustPad = 18;
   const illustW = 368;
   const illustH = 258;
-  const dividerX = cardLeft + illustPad + illustW + 18; // ~452
+  const dividerX = cardLeft + illustPad + illustW + 18;
   const textLeft = dividerX + 28;
   const textRight = cardRight - 28;
   const textMaxW = textRight - textLeft;
@@ -1052,6 +1242,21 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   const hasKhatian = Boolean(khatianField && khatianField.plainText.trim());
   const hasDagKhatianRow = hasDag || hasKhatian;
   const hasAdditional = Boolean(additionalField && additionalField.plainText.trim());
+
+  const preparedMainFields = mainPanelFields.map((fv) => ({
+    fv,
+    paragraphs: splitRunsIntoParagraphTokens(buildFieldInlineRuns(fv), false),
+  }));
+  const dagParagraphs =
+    hasDag && dagField ? splitRunsIntoParagraphTokens(buildFieldInlineRuns(dagField), false) : [];
+  const khatianParagraphs =
+    hasKhatian && khatianField
+      ? splitRunsIntoParagraphTokens(buildFieldInlineRuns(khatianField), false)
+      : [];
+  const additionalParagraphs =
+    hasAdditional && additionalField
+      ? splitRunsIntoParagraphTokens(buildFieldInlineRuns(additionalField), false)
+      : [];
 
   const totalMainChars = mainPanelFields.reduce((s, f) => s + f.plainText.length, 0);
   let mainFontSize = mainPanelFields.length <= 4 && totalMainChars <= 180 ? 45 : 41;
@@ -1066,8 +1271,11 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   let dagGap = 18;
   let addGap = 16;
   let contactGap = 18;
-  const bottomMargin = 44;
+  let bottomMargin = 44;
 
+  let titleTop = headerTop + headerToTitleGap;
+  let titleBottom = titleTop + titleH;
+  let panelTop = titleBottom + panelGap;
   let mainLineH = mainFontSize * mainLineMult;
   let measuredMainBlocks: Array<{ fv: PropertyFieldValue; lines: RichRun[][]; height: number }> = [];
   let mainTextTotalH = 0;
@@ -1082,14 +1290,18 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   let addLineH = addFontSize * addLineMult;
   let addTotalH = 0;
   let rawTotalHeight = 0;
+  let compressedSpacing = false;
   let triedTightPass = false;
 
   while (true) {
+    titleTop = headerTop + headerToTitleGap;
+    titleBottom = titleTop + titleH;
+    panelTop = titleBottom + panelGap;
+
     mainLineH = mainFontSize * mainLineMult;
-    measuredMainBlocks = mainPanelFields.map((fv) => {
-      const runs = buildFieldInlineRuns(fv);
-      const lines = wrapRichRuns(mctx, runs, textMaxW, mainFontSize, false);
-      return { fv, lines, height: lines.length * mainLineH };
+    measuredMainBlocks = preparedMainFields.map((pf) => {
+      const lines = wrapPrebuiltParagraphs(mctx, pf.paragraphs, textMaxW, mainFontSize);
+      return { fv: pf.fv, lines, height: lines.length * mainLineH };
     });
 
     mainTextTotalH =
@@ -1108,17 +1320,11 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     if (hasDagKhatianRow) {
       dagRowTop = cursorBottomY + dagGap;
       const singleSideMaxW = hasDag && hasKhatian ? cardW / 2 - 44 : cardW - 72;
-      if (hasDag && dagField) {
-        dagLines = wrapRichRuns(mctx, buildFieldInlineRuns(dagField), singleSideMaxW, dagFontSize, false);
+      if (hasDag) {
+        dagLines = wrapPrebuiltParagraphs(mctx, dagParagraphs, singleSideMaxW, dagFontSize);
       }
-      if (hasKhatian && khatianField) {
-        khatianLines = wrapRichRuns(
-          mctx,
-          buildFieldInlineRuns(khatianField),
-          singleSideMaxW,
-          dagFontSize,
-          false
-        );
+      if (hasKhatian) {
+        khatianLines = wrapPrebuiltParagraphs(mctx, khatianParagraphs, singleSideMaxW, dagFontSize);
       }
       const maxLines = Math.max(dagLines.length, khatianLines.length, 1);
       dagRowH = Math.min(180, Math.max(76, Math.round(maxLines * dagLineH + 22)));
@@ -1129,16 +1335,10 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     addLines = [];
     addLineH = addFontSize * addLineMult;
     addTotalH = 0;
-    if (hasAdditional && additionalField) {
+    if (hasAdditional) {
       addTop = cursorBottomY + addGap;
       const addMaxW = cardW - 44;
-      addLines = wrapRichRuns(
-        mctx,
-        buildFieldInlineRuns(additionalField),
-        addMaxW,
-        addFontSize,
-        false
-      );
+      addLines = wrapPrebuiltParagraphs(mctx, additionalParagraphs, addMaxW, addFontSize);
       addTotalH = Math.round(addLines.length * addLineH);
       cursorBottomY = addTop + addTotalH;
     }
@@ -1148,15 +1348,29 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       break;
     }
 
+    // Phase 1: Compress vertical spacing & padding FIRST before reducing body fonts
+    if (!compressedSpacing) {
+      compressedSpacing = true;
+      headerToTitleGap = 122;
+      panelGap = 14;
+      dagGap = 12;
+      addGap = 12;
+      contactGap = 12;
+      bottomMargin = 34;
+      panelPadV = 14;
+      mainFieldGap = 6;
+      continue;
+    }
+
+    // Phase 2: Adaptive body/additional/dag font reduction
     let shrunk = false;
+    const step = rawTotalHeight - MAX_POSTER_HEIGHT > 650 ? 4 : 2;
     if (hasMainFields && mainFontSize > MIN_DYNAMIC_BODY_FONT_SIZE) {
-      mainFontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE, mainFontSize - 2);
-      mainFieldGap = Math.max(6, mainFieldGap - 0.5);
-      panelPadV = Math.max(16, panelPadV - 0.5);
+      mainFontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE, mainFontSize - step);
       shrunk = true;
     }
     if (hasAdditional && addFontSize > MIN_LAND_ADDITIONAL_FONT_SIZE) {
-      addFontSize = Math.max(MIN_LAND_ADDITIONAL_FONT_SIZE, addFontSize - 2);
+      addFontSize = Math.max(MIN_LAND_ADDITIONAL_FONT_SIZE, addFontSize - step);
       shrunk = true;
     }
     if (hasDagKhatianRow && dagFontSize > MIN_LAND_DAG_FONT_SIZE && dagRowH > 76) {
@@ -1169,11 +1383,8 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
         triedTightPass = true;
         mainLineMult = 1.14;
         addLineMult = 1.14;
-        dagGap = 12;
-        addGap = 12;
-        contactGap = 14;
-        panelPadV = 16;
-        mainFieldGap = 6;
+        panelPadV = 12;
+        mainFieldGap = 5;
       } else {
         break;
       }
@@ -1221,8 +1432,8 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   ctx.roundRect(22, 22, W - 44, totalHeight - 44, 42);
   ctx.stroke();
 
-  // 2. Top Land/Location Header Emblem
-  drawLandTopEmblemHeader(ctx, W, headerTop, GREEN);
+  // 2. Top Land/Location Header Emblem (cached sprite)
+  drawLandTopEmblemHeaderCached(ctx, W, headerTop, GREEN);
 
   // 3. Dark Green Title Banner
   ctx.fillStyle = GREEN;
@@ -1252,15 +1463,13 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   const drawIllustW = illustW * (drawIllustH / illustH);
 
   if (hasMainFields) {
-    // Left Pasture Illustration (aspect-preserved, vertically centered)
     const illustTop = panelTop + (panelH - drawIllustH) / 2;
-    drawLandPastureScene(
+    drawLandPastureSceneCached(
       ctx,
       { left: cardLeft + illustPad, top: illustTop, width: drawIllustW, height: drawIllustH },
       GREEN
     );
 
-    // Vertical Green Separator Line
     ctx.strokeStyle = GREEN;
     ctx.lineWidth = 4.5;
     ctx.lineCap = 'round';
@@ -1269,7 +1478,6 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     ctx.lineTo(dividerX, panelBottom - 20);
     ctx.stroke();
 
-    // Right Pane Dynamic Fields (clipped cleanly inside panel bounds)
     ctx.save();
     ctx.beginPath();
     ctx.rect(dividerX + 6, panelTop + 12, cardRight - dividerX - 18, Math.max(0, panelH - 24));
@@ -1290,9 +1498,8 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     }
     ctx.restore();
   } else {
-    // Edge case: only Dag/Khatian or Additional info filled, or everything optional empty
     const illustTop = panelTop + (panelH - drawIllustH) / 2;
-    drawLandPastureScene(
+    drawLandPastureSceneCached(
       ctx,
       { left: W / 2 - drawIllustW / 2, top: illustTop, width: drawIllustW, height: drawIllustH },
       GREEN
@@ -1433,11 +1640,12 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   const contactRightMaxW = cardRight - 36 - (cDivX + 28);
   let contactFontSize = 78;
   while (contactFontSize > 42) {
-    ctx.font = buildTitleFont(contactFontSize);
-    if (ctx.measureText(contactStr).width <= contactRightMaxW) break;
+    if (measureWidthCached(ctx, buildContactFont(contactFontSize), contactStr) <= contactRightMaxW) {
+      break;
+    }
     contactFontSize -= 2;
   }
-  ctx.font = buildTitleFont(contactFontSize);
+  ctx.font = buildContactFont(contactFontSize);
   ctx.fillStyle = '#FFFFFF';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

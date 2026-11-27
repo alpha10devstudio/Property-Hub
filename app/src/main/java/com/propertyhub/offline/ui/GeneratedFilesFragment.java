@@ -864,8 +864,8 @@ public class GeneratedFilesFragment extends Fragment {
                 refreshAllData();
                 if (result.hasTextOverflowWarning() && result.getPosterUri() != null) {
                     showFullPosterPreview(
-                            "Long Description Review · " + record.getRecordId(),
-                            "Poster saved cleanly. Review fit below.",
+                            "Max Height Reached (1440×2560px) · " + record.getRecordId(),
+                            "Poster text exceeded 2560px max height even after spacing and font optimization. Review preview or shorten text slightly.",
                             result.getPosterUri()
                     );
                 }
@@ -919,6 +919,13 @@ public class GeneratedFilesFragment extends Fragment {
                             );
                             loadPostersAsync();
                             loadRecordsAsync();
+                            if (res.hasTextOverflowWarning() && res.getPosterUri() != null) {
+                                showFullPosterPreview(
+                                        "Max Height Reached (1440×2560px) · " + item.getRecordId(),
+                                        "Poster text exceeded 2560px max height even after spacing and font optimization. Review preview or shorten text slightly.",
+                                        res.getPosterUri()
+                                );
+                            }
                         } else {
                             new MaterialAlertDialogBuilder(requireContext())
                                     .setTitle("Regeneration Failed")
