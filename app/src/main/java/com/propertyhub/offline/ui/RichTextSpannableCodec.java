@@ -255,7 +255,7 @@ public final class RichTextSpannableCodec {
             try {
                 updateRangeStyle(text, start, end, applyBold, enableTarget);
                 if (editText.hasFocus() || editText.requestFocus()) {
-                    Selection.setSelection(text, start, end);
+                    editText.setSelection(start, end);
                 }
                 editText.invalidate();
             } finally {
@@ -273,6 +273,8 @@ public final class RichTextSpannableCodec {
         private void installWatcher() {
             editText.addTextChangedListener(new TextWatcher() {
                 private String oldReplacedSlice = "";
+                private boolean[] oldBoldFlags = new boolean[0];
+                private boolean[] oldItalicFlags = new boolean[0];
                 private int changeStart = 0;
                 private int newCount = 0;
 
@@ -280,11 +282,24 @@ public final class RichTextSpannableCodec {
                 public void beforeTextChanged(CharSequence s, int start, int count, int after) {
                     if (internalChange || s == null) {
                         oldReplacedSlice = "";
+                        oldBoldFlags = new boolean[0];
+                        oldItalicFlags = new boolean[0];
                         return;
                     }
                     int safeStart = Math.max(0, Math.min(start, s.length()));
                     int safeEnd = Math.max(safeStart, Math.min(safeStart + count, s.length()));
                     oldReplacedSlice = s.subSequence(safeStart, safeEnd).toString();
+                    int oldLen = safeEnd - safeStart;
+                    oldBoldFlags = new boolean[oldLen];
+                    oldItalicFlags = new boolean[oldLen];
+                    if (oldLen > 0 && s instanceof Spanned) {
+                        Spanned spanned = (Spanned) s;
+                        for (int i = 0; i < oldLen; i++) {
+                            StyleState st = inspectChar(spanned, safeStart + i);
+                            oldBoldFlags[i] = st.bold;
+                            oldItalicFlags[i] = st.italic;
+                        }
+                    }
                 }
 
                 @Override
@@ -309,34 +324,71 @@ public final class RichTextSpannableCodec {
                         return;
                     }
 
-                    // Compute minimal newly inserted range so Bengali IME composing does not overwrite earlier spans
+                    // Preserve exact prior Bold/Italic spans on prefix/suffix wiped by IME composing replacement,
+                    // while applying current sticky (pendingBold, pendingItalic) to newly inserted characters.
                     String newSlice = s.subSequence(changeStart, safeEnd).toString();
                     int oldLen = oldReplacedSlice.length();
                     int newLen = newSlice.length();
-                    int prefix = 0;
-                    while (prefix < oldLen
-                            && prefix < newLen
-                            && oldReplacedSlice.charAt(prefix) == newSlice.charAt(prefix)) {
-                        prefix++;
+
+                    int selEnd = Selection.getSelectionEnd(s);
+                    int maxSuffix = newLen;
+                    if (selEnd >= changeStart && selEnd <= safeEnd) {
+                        maxSuffix = Math.max(0, safeEnd - selEnd);
                     }
+
                     int suffix = 0;
-                    while (suffix < (oldLen - prefix)
-                            && suffix < (newLen - prefix)
+                    while (suffix < maxSuffix
+                            && suffix < oldLen
+                            && suffix < newLen
                             && oldReplacedSlice.charAt(oldLen - 1 - suffix)
                             == newSlice.charAt(newLen - 1 - suffix)) {
                         suffix++;
                     }
 
-                    int applyStart = changeStart + prefix;
-                    int applyEnd = safeEnd - suffix;
-                    if (applyEnd <= applyStart) {
-                        return;
+                    int maxPrefixLimit = Math.min(oldLen - suffix, newLen - suffix);
+                    int prefix = 0;
+                    while (prefix < maxPrefixLimit
+                            && oldReplacedSlice.charAt(prefix) == newSlice.charAt(prefix)) {
+                        prefix++;
+                    }
+
+                    boolean[] targetBold = new boolean[newLen];
+                    boolean[] targetItalic = new boolean[newLen];
+                    for (int i = 0; i < prefix; i++) {
+                        targetBold[i] = oldBoldFlags[i];
+                        targetItalic[i] = oldItalicFlags[i];
+                    }
+                    int insertedEnd = newLen - suffix;
+                    for (int i = prefix; i < insertedEnd; i++) {
+                        targetBold[i] = pendingBold;
+                        targetItalic[i] = pendingItalic;
+                    }
+                    for (int j = 0; j < suffix; j++) {
+                        int newIdx = insertedEnd + j;
+                        int oldIdx = oldLen - suffix + j;
+                        targetBold[newIdx] = oldBoldFlags[oldIdx];
+                        targetItalic[newIdx] = oldItalicFlags[oldIdx];
                     }
 
                     internalChange = true;
                     try {
-                        stripOrSplitSpansInRange(s, applyStart, applyEnd);
-                        applyFlags(s, applyStart, applyEnd, pendingBold, pendingItalic);
+                        stripOrSplitSpansInRange(s, changeStart, safeEnd);
+                        int runStart = 0;
+                        for (int i = 1; i <= newLen; i++) {
+                            boolean endRun = (i == newLen)
+                                    || (targetBold[i] != targetBold[runStart])
+                                    || (targetItalic[i] != targetItalic[runStart]);
+                            if (endRun) {
+                                applyFlags(
+                                        s,
+                                        changeStart + runStart,
+                                        changeStart + i,
+                                        targetBold[runStart],
+                                        targetItalic[runStart]
+                                );
+                                runStart = i;
+                            }
+                        }
                     } finally {
                         internalChange = false;
                     }

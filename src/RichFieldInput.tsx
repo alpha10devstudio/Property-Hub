@@ -12,6 +12,9 @@ interface RichFieldInputProps {
   accent: 'blue' | 'green';
   value: PropertyFieldValue;
   resetToken: number;
+  stickyBold?: boolean;
+  stickyItalic?: boolean;
+  onStickyChange?: (bold: boolean, italic: boolean) => void;
   error?: string;
   inputSurfaceClass: string;
   onChange: (next: PropertyFieldValue) => void;
@@ -383,19 +386,33 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
   accent,
   value,
   resetToken,
+  stickyBold = false,
+  stickyItalic = false,
+  onStickyChange,
   error,
   inputSurfaceClass,
   onChange,
 }) => {
   const editorRef = useRef<HTMLDivElement | null>(null);
-  const manualBoldRef = useRef(false);
-  const manualItalicRef = useRef(false);
-  const [boldActive, setBoldActive] = useState(false);
-  const [italicActive, setItalicActive] = useState(false);
+  const manualBoldRef = useRef(stickyBold);
+  const manualItalicRef = useRef(stickyItalic);
+  const [boldActive, setBoldActive] = useState(stickyBold);
+  const [italicActive, setItalicActive] = useState(stickyItalic);
 
   const savedOffsetsRef = useRef<TextOffsets | null>(null);
   const lastSegmentsRef = useRef<StyledSegment[]>(value?.segments ?? []);
   const isComposingRef = useRef(false);
+
+  useEffect(() => {
+    manualBoldRef.current = stickyBold;
+    manualItalicRef.current = stickyItalic;
+    const el = editorRef.current;
+    const offsets = el ? getSelectionRangeOffsets(el) : null;
+    if (!offsets || offsets.start === offsets.end) {
+      setBoldActive(stickyBold);
+      setItalicActive(stickyItalic);
+    }
+  }, [stickyBold, stickyItalic]);
 
   useEffect(() => {
     if (!formattable || !editorRef.current) return;
@@ -403,10 +420,8 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
     populateDomFromSegments(editorRef.current, initialSegs);
     lastSegmentsRef.current = initialSegs;
     savedOffsetsRef.current = null;
-    manualBoldRef.current = false;
-    manualItalicRef.current = false;
-    setBoldActive(false);
-    setItalicActive(false);
+    setBoldActive(manualBoldRef.current);
+    setItalicActive(manualItalicRef.current);
   }, [resetToken, formattable]);
 
   const captureEditorSelection = () => {
@@ -574,6 +589,7 @@ export const RichFieldInput: React.FC<RichFieldInputProps> = ({
       manualItalicRef.current = !manualItalicRef.current;
       setItalicActive(manualItalicRef.current);
     }
+    onStickyChange?.(manualBoldRef.current, manualItalicRef.current);
 
     el.focus();
     if (activeOffsets) {

@@ -181,6 +181,9 @@ export default function App() {
   const [landDirtyFields, setLandDirtyFields] = useState<Record<string, boolean>>({});
   const [houseFieldResetTokens, setHouseFieldResetTokens] = useState<Record<string, number>>({});
   const [landFieldResetTokens, setLandFieldResetTokens] = useState<Record<string, number>>({});
+  const [stickyFieldStyles, setStickyFieldStyles] = useState<
+    Record<string, { bold: boolean; italic: boolean }>
+  >({});
   const [houseResetToken, setHouseResetToken] = useState(0);
   const [landResetToken, setLandResetToken] = useState(0);
   const [submittingCategory, setSubmittingCategory] = useState<CategoryCode | null>(null);
@@ -1171,36 +1174,50 @@ export default function App() {
                           onSubmit={(e) => handleSubmit(activeCategory, e)}
                           className="space-y-3 p-4"
                         >
-                          {currentConfigs.map((cfg) => (
-                            <RichFieldInput
-                              key={`${activeCategory}-${cfg.fieldId}`}
-                              fieldId={cfg.fieldId}
-                              label={cfg.label}
-                              required={cfg.required}
-                              multiline={cfg.inputType === 'MULTILINE'}
-                              formattable={cfg.formattable}
-                              inputType={cfg.inputType}
-                              placeholder={cfg.placeholder}
-                              accent={activeCategory === 'HOUSE_FOR_RENT' ? 'blue' : 'green'}
-                              value={currentForm[cfg.fieldId]}
-                              resetToken={currentResetToken + (currentFieldResetTokens[cfg.fieldId] ?? 0)}
-                              error={currentErrors[cfg.fieldId]}
-                              inputSurfaceClass={inputSurface}
-                              onChange={(next) => {
-                                if (activeCategory === 'HOUSE_FOR_RENT') {
-                                  setHouseForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
-                                  setHouseDirtyFields((prev) =>
-                                    prev[cfg.fieldId] ? prev : { ...prev, [cfg.fieldId]: true }
-                                  );
-                                } else {
-                                  setLandForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
-                                  setLandDirtyFields((prev) =>
-                                    prev[cfg.fieldId] ? prev : { ...prev, [cfg.fieldId]: true }
-                                  );
+                          {currentConfigs.map((cfg) => {
+                            const stickyKey = `${activeCategory}|${cfg.fieldId}`;
+                            const stickyState = stickyFieldStyles[stickyKey];
+                            return (
+                              <RichFieldInput
+                                key={`${activeCategory}-${cfg.fieldId}`}
+                                fieldId={cfg.fieldId}
+                                label={cfg.label}
+                                required={cfg.required}
+                                multiline={cfg.inputType === 'MULTILINE'}
+                                formattable={cfg.formattable}
+                                inputType={cfg.inputType}
+                                placeholder={cfg.placeholder}
+                                accent={activeCategory === 'HOUSE_FOR_RENT' ? 'blue' : 'green'}
+                                value={currentForm[cfg.fieldId]}
+                                resetToken={
+                                  currentResetToken + (currentFieldResetTokens[cfg.fieldId] ?? 0)
                                 }
-                              }}
-                            />
-                          ))}
+                                stickyBold={stickyState?.bold ?? false}
+                                stickyItalic={stickyState?.italic ?? false}
+                                onStickyChange={(bold, italic) => {
+                                  setStickyFieldStyles((prev) => ({
+                                    ...prev,
+                                    [stickyKey]: { bold, italic },
+                                  }));
+                                }}
+                                error={currentErrors[cfg.fieldId]}
+                                inputSurfaceClass={inputSurface}
+                                onChange={(next) => {
+                                  if (activeCategory === 'HOUSE_FOR_RENT') {
+                                    setHouseForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
+                                    setHouseDirtyFields((prev) =>
+                                      prev[cfg.fieldId] ? prev : { ...prev, [cfg.fieldId]: true }
+                                    );
+                                  } else {
+                                    setLandForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
+                                    setLandDirtyFields((prev) =>
+                                      prev[cfg.fieldId] ? prev : { ...prev, [cfg.fieldId]: true }
+                                    );
+                                  }
+                                }}
+                              />
+                            );
+                          })}
 
                           <button
                             type="submit"
@@ -1802,6 +1819,7 @@ export default function App() {
                     setLandForm(createInitialFormMap('LAND_FOR_SALE', [], {}));
                     setHouseDirtyFields({});
                     setLandDirtyFields({});
+                    setStickyFieldStyles({});
                     setHouseResetToken((n) => n + 1);
                     setLandResetToken((n) => n + 1);
                     setSelectedTxtFile(null);

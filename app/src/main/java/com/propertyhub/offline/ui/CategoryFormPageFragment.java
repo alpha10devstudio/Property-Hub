@@ -63,6 +63,7 @@ public class CategoryFormPageFragment extends Fragment {
     private static final String ARG_CATEGORY = "arg_category";
     private static final String STATE_FIELDS_JSON = "state_fields_json";
     private static final String STATE_USER_EDITED_IDS = "state_user_edited_ids";
+    private static final String STATE_PENDING_STYLES = "state_pending_styles";
     private static final long SUBMIT_DEBOUNCE_MS = 700L;
 
     private PropertyCategory category = PropertyCategory.HOUSE_FOR_RENT;
@@ -183,6 +184,7 @@ public class CategoryFormPageFragment extends Fragment {
         Map<String, PropertyFieldValue> restoredMap = new HashMap<>();
         Set<String> restoredIds = new HashSet<>();
         userEditedFieldIds.clear();
+        pendingStyleByField.clear();
         if (savedInstanceState != null) {
             String json = savedInstanceState.getString(STATE_FIELDS_JSON);
             for (PropertyFieldValue fv : PropertyFieldValue.fromJsonArrayString(json)) {
@@ -192,6 +194,15 @@ public class CategoryFormPageFragment extends Fragment {
             ArrayList<String> edited = savedInstanceState.getStringArrayList(STATE_USER_EDITED_IDS);
             if (edited != null) {
                 userEditedFieldIds.addAll(edited);
+            }
+            Bundle styleBundle = savedInstanceState.getBundle(STATE_PENDING_STYLES);
+            if (styleBundle != null) {
+                for (String key : styleBundle.keySet()) {
+                    boolean[] flags = styleBundle.getBooleanArray(key);
+                    if (flags != null && flags.length == 2) {
+                        pendingStyleByField.put(key, flags);
+                    }
+                }
             }
         }
 
@@ -248,8 +259,19 @@ public class CategoryFormPageFragment extends Fragment {
         super.onSaveInstanceState(outState);
         if (!fieldBindings.isEmpty()) {
             outState.putString(STATE_FIELDS_JSON, PropertyFieldValue.toJsonArrayString(collectFieldValues()));
+            for (FieldBinding binding : fieldBindings) {
+                if (binding.richController != null) {
+                    RichTextSpannableCodec.StyleState st = binding.richController.getPendingState();
+                    pendingStyleByField.put(binding.config.getFieldId(), new boolean[]{st.bold, st.italic});
+                }
+            }
         }
         outState.putStringArrayList(STATE_USER_EDITED_IDS, new ArrayList<>(userEditedFieldIds));
+        Bundle styleBundle = new Bundle();
+        for (Map.Entry<String, boolean[]> entry : pendingStyleByField.entrySet()) {
+            styleBundle.putBooleanArray(entry.getKey(), entry.getValue());
+        }
+        outState.putBundle(STATE_PENDING_STYLES, styleBundle);
     }
 
     @Override
@@ -535,7 +557,12 @@ public class CategoryFormPageFragment extends Fragment {
 
     private void resetFormToDefaults() {
         userEditedFieldIds.clear();
-        pendingStyleByField.clear();
+        for (FieldBinding binding : fieldBindings) {
+            if (binding.richController != null) {
+                RichTextSpannableCodec.StyleState st = binding.richController.getPendingState();
+                pendingStyleByField.put(binding.config.getFieldId(), new boolean[]{st.bold, st.italic});
+            }
+        }
         if (isAdded() && fieldsContainer != null && host != null) {
             buildDynamicFields(fieldsContainer, isHouseTheme, Collections.emptyMap(), Collections.emptySet());
             return;
@@ -544,7 +571,7 @@ public class CategoryFormPageFragment extends Fragment {
             binding.editText.setError(null);
             binding.editText.setText(binding.config.getDefaultValue());
             if (binding.richController != null) {
-                binding.richController.resetPending();
+                binding.richController.syncFromCursor();
             }
         }
     }
