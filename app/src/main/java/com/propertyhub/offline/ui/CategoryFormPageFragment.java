@@ -166,6 +166,9 @@ public class CategoryFormPageFragment extends Fragment {
             tvBannerTitle.setText(R.string.house_for_rent_title);
             tvBannerSubtitle.setText(R.string.house_for_rent_subtitle);
             tvBannerSubtitle.setTextColor(ContextCompat.getColor(requireContext(), R.color.header_subtitle));
+            btnCustomizeFields.setBackgroundTintList(ColorStateList.valueOf(0xF2061A42));
+            btnCustomizeFields.setTextColor(0xFFFDE047);
+            btnCustomizeFields.setStrokeColor(ColorStateList.valueOf(0xCCFDE047));
             btnCategorySubmit.setText(R.string.submit_house_for_rent);
             btnCategorySubmit.setBackgroundTintList(ColorStateList.valueOf(
                     ContextCompat.getColor(requireContext(), R.color.blue_primary)));
@@ -176,6 +179,9 @@ public class CategoryFormPageFragment extends Fragment {
             tvBannerTitle.setText(R.string.land_for_sale_title);
             tvBannerSubtitle.setText(R.string.land_for_sale_subtitle);
             tvBannerSubtitle.setTextColor(0xFFE3FFE9);
+            btnCustomizeFields.setBackgroundTintList(ColorStateList.valueOf(0xF2043B18));
+            btnCustomizeFields.setTextColor(0xFFFDE047);
+            btnCustomizeFields.setStrokeColor(ColorStateList.valueOf(0xCCFDE047));
             btnCategorySubmit.setText(R.string.submit_land_for_sale);
             btnCategorySubmit.setBackgroundTintList(ColorStateList.valueOf(
                     ContextCompat.getColor(requireContext(), R.color.green_primary)));

@@ -1163,7 +1163,11 @@ export default function App() {
                           <button
                             type="button"
                             onClick={() => openFieldsManager(activeCategory)}
-                            className="inline-flex h-8 items-center gap-1 rounded-lg border border-white/40 bg-white/15 px-2.5 text-[11px] font-bold text-white hover:bg-white/25"
+                            className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[11px] font-bold text-[#FDE047] shadow-sm transition-colors ${
+                              activeCategory === 'HOUSE_FOR_RENT'
+                                ? 'border-[#FDE047]/80 bg-[#061A42]/95 hover:bg-[#061A42]'
+                                : 'border-[#FDE047]/80 bg-[#043B18]/95 hover:bg-[#043B18]'
+                            }`}
                           >
                             <SlidersHorizontal className="h-3.5 w-3.5" />
                             <span>Fields</span>
