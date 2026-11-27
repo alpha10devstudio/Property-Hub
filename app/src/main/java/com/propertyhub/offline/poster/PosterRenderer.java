@@ -38,14 +38,14 @@ public class PosterRenderer {
             if (record.getCategory() == PropertyCategory.HOUSE_FOR_RENT) {
                 DynamicPosterLayoutEngine.HouseDynamicPlan plan =
                         HousePosterTemplate.measurePlan(appContext, record, POSTER_WIDTH);
-                dynamicHeight = Math.max(480, plan.totalHeight);
+                dynamicHeight = DynamicPosterLayoutEngine.clampPosterHeight(plan.totalHeight);
                 bitmap = Bitmap.createBitmap(POSTER_WIDTH, dynamicHeight, Bitmap.Config.ARGB_8888);
                 Canvas canvas = new Canvas(bitmap);
                 overflowed = HousePosterTemplate.render(appContext, canvas, record, plan);
             } else {
                 DynamicPosterLayoutEngine.LandDynamicPlan plan =
                         LandPosterTemplate.measurePlan(appContext, record, POSTER_WIDTH);
-                dynamicHeight = Math.max(480, plan.totalHeight);
+                dynamicHeight = DynamicPosterLayoutEngine.clampPosterHeight(plan.totalHeight);
                 bitmap = Bitmap.createBitmap(POSTER_WIDTH, dynamicHeight, Bitmap.Config.ARGB_8888);
                 Canvas canvas = new Canvas(bitmap);
                 overflowed = LandPosterTemplate.render(appContext, canvas, record, plan);

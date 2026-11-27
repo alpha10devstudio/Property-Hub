@@ -27,6 +27,12 @@ import java.util.List;
  */
 public final class DynamicPosterLayoutEngine {
 
+    public static final int MIN_POSTER_HEIGHT_PX = 480;
+    public static final int MAX_POSTER_HEIGHT_PX = 2160;
+    public static final float MIN_DYNAMIC_BODY_FONT_SIZE_PX = 24f;
+    public static final float MIN_LAND_ADDITIONAL_FONT_SIZE_PX = 24f;
+    public static final float MIN_LAND_DAG_FONT_SIZE_PX = 28f;
+
     public static final float OUTER_MARGIN_PX = 22f;
     public static final float CARD_SIDE_MARGIN_PX = 48f;
     public static final float SECTION_GAP_PX = 24f;
@@ -46,6 +52,10 @@ public final class DynamicPosterLayoutEngine {
     public static final float DETAILS_VERT_PADDING_PX = 28f;
     public static final float DETAILS_LEFT_PANE_WIDTH_PX = 320f;
     public static final float DETAILS_TEXT_SIDE_PADDING_PX = 32f;
+
+    public static int clampPosterHeight(int computedHeight) {
+        return Math.max(MIN_POSTER_HEIGHT_PX, Math.min(MAX_POSTER_HEIGHT_PX, computedHeight));
+    }
 
     public static final class GeometryMetrics {
         public final float outerLeft;
@@ -172,6 +182,7 @@ public final class DynamicPosterLayoutEngine {
         public final boolean hasFields;
         public final List<TextBlockPlacement> textBlocks;
         public final RectF contactRect;
+        public final boolean overflowed;
 
         public HouseDynamicPlan(
                 int width,
@@ -188,7 +199,8 @@ public final class DynamicPosterLayoutEngine {
                 float dividerX,
                 boolean hasFields,
                 @NonNull List<TextBlockPlacement> textBlocks,
-                @NonNull RectF contactRect
+                @NonNull RectF contactRect,
+                boolean overflowed
         ) {
             this.width = width;
             this.totalHeight = totalHeight;
@@ -205,6 +217,7 @@ public final class DynamicPosterLayoutEngine {
             this.hasFields = hasFields;
             this.textBlocks = textBlocks;
             this.contactRect = contactRect;
+            this.overflowed = overflowed;
         }
     }
 
@@ -235,6 +248,7 @@ public final class DynamicPosterLayoutEngine {
         public final float additionalTopY;
         public final float additionalLeftX;
         public final RectF contactRect;
+        public final boolean overflowed;
 
         public LandDynamicPlan(
                 int width,
@@ -258,7 +272,8 @@ public final class DynamicPosterLayoutEngine {
                 @Nullable StaticLayout additionalLayout,
                 float additionalTopY,
                 float additionalLeftX,
-                @NonNull RectF contactRect
+                @NonNull RectF contactRect,
+                boolean overflowed
         ) {
             this.width = width;
             this.totalHeight = totalHeight;
@@ -282,6 +297,7 @@ public final class DynamicPosterLayoutEngine {
             this.additionalTopY = additionalTopY;
             this.additionalLeftX = additionalLeftX;
             this.contactRect = contactRect;
+            this.overflowed = overflowed;
         }
     }
 
@@ -337,38 +353,71 @@ public final class DynamicPosterLayoutEngine {
             fontSize = 38f;
         }
 
+        boolean hasFields = !nonEmptyVisibleFields.isEmpty();
+        float minPanelH = hasFields ? 316f : 256f;
+        float fieldGap = 20f;
+        float padV = 34f;
+        float lineMult = 1.18f;
+        float bottomReserve = SECTION_GAP_PX + CONTACT_HEIGHT_PX + 46f;
+
         TextPaint bodyPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
         bodyPaint.setColor(theme.getDetailsTextColor());
         bodyPaint.setTypeface(paragraphTypeface);
-        bodyPaint.setTextSize(fontSize);
 
-        float fieldGap = 20f;
-        List<StaticLayout> rawLayouts = new ArrayList<>(nonEmptyVisibleFields.size());
+        List<StaticLayout> rawLayouts = Collections.emptyList();
         float textTotalH = 0f;
-        for (int i = 0; i < nonEmptyVisibleFields.size(); i++) {
-            PropertyFieldValue fv = nonEmptyVisibleFields.get(i);
-            SpannableStringBuilder inlineSpannable = buildInlineFieldSpannable(fv, paragraphTypeface);
-            StaticLayout layout = StaticLayout.Builder
-                    .obtain(inlineSpannable, 0, inlineSpannable.length(), bodyPaint, textMaxW)
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setLineSpacing(0f, 1.18f)
-                    .setIncludePad(true)
-                    .build();
-            rawLayouts.add(layout);
-            textTotalH += layout.getHeight();
-            if (i < nonEmptyVisibleFields.size() - 1) {
-                textTotalH += fieldGap;
+        float panelH = minPanelH;
+        int rawTotalHeight;
+
+        while (true) {
+            bodyPaint.setTextSize(fontSize);
+            rawLayouts = new ArrayList<>(nonEmptyVisibleFields.size());
+            textTotalH = 0f;
+            for (int i = 0; i < nonEmptyVisibleFields.size(); i++) {
+                PropertyFieldValue fv = nonEmptyVisibleFields.get(i);
+                SpannableStringBuilder inlineSpannable = buildInlineFieldSpannable(fv, paragraphTypeface);
+                StaticLayout layout = StaticLayout.Builder
+                        .obtain(inlineSpannable, 0, inlineSpannable.length(), bodyPaint, textMaxW)
+                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                        .setLineSpacing(0f, lineMult)
+                        .setIncludePad(true)
+                        .build();
+                rawLayouts.add(layout);
+                textTotalH += layout.getHeight();
+                if (i < nonEmptyVisibleFields.size() - 1) {
+                    textTotalH += fieldGap;
+                }
+            }
+
+            panelH = Math.max(minPanelH, textTotalH + padV * 2f);
+            rawTotalHeight = Math.round(panelTop + panelH + bottomReserve);
+
+            if (rawTotalHeight <= MAX_POSTER_HEIGHT_PX) {
+                break;
+            }
+            if (fontSize > MIN_DYNAMIC_BODY_FONT_SIZE_PX) {
+                fontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE_PX, fontSize - 2f);
+                fieldGap = Math.max(10f, fieldGap - 1f);
+                padV = Math.max(24f, padV - 1f);
+            } else if (lineMult > 1.10f) {
+                lineMult = 1.10f;
+                fieldGap = 10f;
+                padV = 22f;
+            } else {
+                break;
             }
         }
 
-        boolean hasFields = !nonEmptyVisibleFields.isEmpty();
-        float minPanelH = hasFields ? 316f : 256f;
-        float padV = 34f;
-        float panelH = Math.max(minPanelH, textTotalH + padV * 2f);
+        boolean overflowed = rawTotalHeight > MAX_POSTER_HEIGHT_PX;
+        float maxAllowedPanelH = Math.max(200f, MAX_POSTER_HEIGHT_PX - bottomReserve - panelTop);
+        if (overflowed) {
+            panelH = Math.min(panelH, maxAllowedPanelH);
+        }
+
         RectF panelRect = new RectF(cardLeft, panelTop, cardRight, panelTop + panelH);
 
         List<TextBlockPlacement> placements = new ArrayList<>(rawLayouts.size());
-        float innerAvailH = panelH - padV * 2f;
+        float innerAvailH = Math.max(0f, panelH - padV * 2f);
         float cursorY = panelRect.top + padV + Math.max(0f, (innerAvailH - textTotalH) / 2f);
         for (int i = 0; i < nonEmptyVisibleFields.size(); i++) {
             StaticLayout l = rawLayouts.get(i);
@@ -378,7 +427,7 @@ public final class DynamicPosterLayoutEngine {
 
         float contactTop = panelRect.bottom + SECTION_GAP_PX;
         RectF contactRect = new RectF(cardLeft, contactTop, cardRight, contactTop + CONTACT_HEIGHT_PX);
-        int totalHeight = Math.round(contactRect.bottom + 46f);
+        int totalHeight = clampPosterHeight(Math.round(contactRect.bottom + 46f));
         RectF outerRect = new RectF(
                 OUTER_MARGIN_PX,
                 OUTER_MARGIN_PX,
@@ -406,7 +455,8 @@ public final class DynamicPosterLayoutEngine {
                 dividerX,
                 hasFields,
                 placements,
-                contactRect
+                contactRect,
+                overflowed
         );
     }
 
@@ -479,40 +529,205 @@ public final class DynamicPosterLayoutEngine {
             mainFontSize = 36f;
         }
 
+        boolean hasMainFields = !mainPanelFields.isEmpty();
+        boolean hasDag = dagField != null && !dagField.isEmpty();
+        boolean hasKhatian = khatianField != null && !khatianField.isEmpty();
+        boolean hasDagKhatianRow = hasDag || hasKhatian;
+        boolean hasAdditional = additionalField != null && !additionalField.isEmpty();
+
+        float mainFieldGap = 12f;
+        float panelPadV = 22f;
+        float mainLineMult = 1.16f;
+        float dagFontSize = 44f;
+        float addFontSize = (additionalField != null && additionalField.getPlainText().length() > 260) ? 36f : 40f;
+        float addLineMult = 1.15f;
+        float dagGap = 18f;
+        float addGap = 16f;
+        float contactGap = 18f;
+        float bottomMargin = 44f;
+
         TextPaint bodyPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
         bodyPaint.setColor(theme.getDetailsTextColor());
         bodyPaint.setTypeface(paragraphTypeface);
-        bodyPaint.setTextSize(mainFontSize);
 
-        float mainFieldGap = 12f;
-        List<StaticLayout> mainLayouts = new ArrayList<>(mainPanelFields.size());
-        float mainTextTotalH = 0f;
-        for (int i = 0; i < mainPanelFields.size(); i++) {
-            SpannableStringBuilder sb = buildInlineFieldSpannable(mainPanelFields.get(i), paragraphTypeface);
-            StaticLayout layout = StaticLayout.Builder
-                    .obtain(sb, 0, sb.length(), bodyPaint, textMaxW)
-                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                    .setLineSpacing(0f, 1.16f)
-                    .setIncludePad(true)
-                    .build();
-            mainLayouts.add(layout);
-            mainTextTotalH += layout.getHeight();
-            if (i < mainPanelFields.size() - 1) {
-                mainTextTotalH += mainFieldGap;
+        TextPaint dagPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
+        dagPaint.setColor(theme.getDetailsTextColor());
+        dagPaint.setTypeface(paragraphTypeface);
+
+        TextPaint addPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
+        addPaint.setColor(theme.getDetailsTextColor());
+        addPaint.setTypeface(paragraphTypeface);
+
+        List<StaticLayout> mainLayouts;
+        float mainTextTotalH;
+        float panelH;
+        RectF dagKhatianRect;
+        StaticLayout dagLayout;
+        StaticLayout khatianLayout;
+        float dagRowH;
+        StaticLayout additionalLayout;
+        float addTopY;
+        float addLeftX = cardLeft + 22f;
+        int rawTotalHeight;
+        boolean triedTightPass = false;
+
+        while (true) {
+            bodyPaint.setTextSize(mainFontSize);
+            mainLayouts = new ArrayList<>(mainPanelFields.size());
+            mainTextTotalH = 0f;
+            for (int i = 0; i < mainPanelFields.size(); i++) {
+                SpannableStringBuilder sb = buildInlineFieldSpannable(mainPanelFields.get(i), paragraphTypeface);
+                StaticLayout layout = StaticLayout.Builder
+                        .obtain(sb, 0, sb.length(), bodyPaint, textMaxW)
+                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                        .setLineSpacing(0f, mainLineMult)
+                        .setIncludePad(true)
+                        .build();
+                mainLayouts.add(layout);
+                mainTextTotalH += layout.getHeight();
+                if (i < mainPanelFields.size() - 1) {
+                    mainTextTotalH += mainFieldGap;
+                }
+            }
+
+            panelH = Math.max(illustH + panelPadV * 2f, mainTextTotalH + panelPadV * 2f);
+            float cursorBottomY = panelTop + panelH;
+
+            dagKhatianRect = new RectF();
+            dagLayout = null;
+            khatianLayout = null;
+            dagRowH = 0f;
+
+            if (hasDagKhatianRow) {
+                float dagTop = cursorBottomY + dagGap;
+                int sideMaxW = Math.round((hasDag && hasKhatian) ? (cardWidth / 2f - 44f) : (cardWidth - 72f));
+                dagPaint.setTextSize(dagFontSize);
+
+                int maxDagH = 0;
+                if (hasDag && dagField != null) {
+                    SpannableStringBuilder sb = buildInlineFieldSpannable(dagField, paragraphTypeface);
+                    dagLayout = StaticLayout.Builder
+                            .obtain(sb, 0, sb.length(), dagPaint, sideMaxW)
+                            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                            .setLineSpacing(0f, 1.12f)
+                            .setIncludePad(true)
+                            .build();
+                    maxDagH = Math.max(maxDagH, dagLayout.getHeight());
+                }
+                if (hasKhatian && khatianField != null) {
+                    SpannableStringBuilder sb = buildInlineFieldSpannable(khatianField, paragraphTypeface);
+                    khatianLayout = StaticLayout.Builder
+                            .obtain(sb, 0, sb.length(), dagPaint, sideMaxW)
+                            .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                            .setLineSpacing(0f, 1.12f)
+                            .setIncludePad(true)
+                            .build();
+                    maxDagH = Math.max(maxDagH, khatianLayout.getHeight());
+                }
+                dagRowH = Math.min(180f, Math.max(76f, maxDagH + 22f));
+                dagKhatianRect = new RectF(cardLeft, dagTop, cardRight, dagTop + dagRowH);
+                cursorBottomY = dagKhatianRect.bottom;
+            }
+
+            additionalLayout = null;
+            addTopY = 0f;
+            if (hasAdditional && additionalField != null) {
+                addTopY = cursorBottomY + addGap;
+                addPaint.setTextSize(addFontSize);
+                int addMaxW = Math.round(cardWidth - 44f);
+                SpannableStringBuilder sb = buildInlineFieldSpannable(additionalField, paragraphTypeface);
+                additionalLayout = StaticLayout.Builder
+                        .obtain(sb, 0, sb.length(), addPaint, addMaxW)
+                        .setAlignment(Layout.Alignment.ALIGN_CENTER)
+                        .setLineSpacing(0f, addLineMult)
+                        .setIncludePad(true)
+                        .build();
+                if (additionalLayout.getLineCount() > 2) {
+                    additionalLayout = StaticLayout.Builder
+                            .obtain(sb, 0, sb.length(), addPaint, addMaxW)
+                            .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                            .setLineSpacing(0f, addLineMult)
+                            .setIncludePad(true)
+                            .build();
+                }
+                cursorBottomY = addTopY + additionalLayout.getHeight();
+            }
+
+            float contactTop = cursorBottomY + contactGap;
+            rawTotalHeight = Math.round(contactTop + CONTACT_HEIGHT_PX + bottomMargin);
+
+            if (rawTotalHeight <= MAX_POSTER_HEIGHT_PX) {
+                break;
+            }
+
+            boolean shrunk = false;
+            if (hasMainFields && mainFontSize > MIN_DYNAMIC_BODY_FONT_SIZE_PX) {
+                mainFontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE_PX, mainFontSize - 2f);
+                mainFieldGap = Math.max(6f, mainFieldGap - 0.5f);
+                panelPadV = Math.max(16f, panelPadV - 0.5f);
+                shrunk = true;
+            }
+            if (hasAdditional && addFontSize > MIN_LAND_ADDITIONAL_FONT_SIZE_PX) {
+                addFontSize = Math.max(MIN_LAND_ADDITIONAL_FONT_SIZE_PX, addFontSize - 2f);
+                shrunk = true;
+            }
+            if (hasDagKhatianRow && dagFontSize > MIN_LAND_DAG_FONT_SIZE_PX && dagRowH > 76f) {
+                dagFontSize = Math.max(MIN_LAND_DAG_FONT_SIZE_PX, dagFontSize - 2f);
+                shrunk = true;
+            }
+
+            if (!shrunk) {
+                if (!triedTightPass) {
+                    triedTightPass = true;
+                    mainLineMult = 1.08f;
+                    addLineMult = 1.08f;
+                    dagGap = 12f;
+                    addGap = 12f;
+                    contactGap = 14f;
+                    panelPadV = 16f;
+                    mainFieldGap = 6f;
+                } else {
+                    break;
+                }
             }
         }
 
-        boolean hasMainFields = !mainPanelFields.isEmpty();
-        float panelPadV = 22f;
-        float panelH = Math.max(illustH + panelPadV * 2f, mainTextTotalH + panelPadV * 2f);
-        RectF panelRect = new RectF(cardLeft, panelTop, cardRight, panelTop + panelH);
+        boolean overflowed = rawTotalHeight > MAX_POSTER_HEIGHT_PX;
+        int totalHeight = clampPosterHeight(rawTotalHeight);
+        float contactBottom = overflowed
+                ? (totalHeight - bottomMargin)
+                : (rawTotalHeight - bottomMargin);
+        float contactTop = contactBottom - CONTACT_HEIGHT_PX;
 
-        float illustLeft = hasMainFields ? (cardLeft + illustPad) : (canvasWidth / 2f - illustW / 2f);
-        float illustTop = panelRect.top + (panelH - illustH) / 2f;
-        RectF illustRect = new RectF(illustLeft, illustTop, illustLeft + illustW, illustTop + illustH);
+        if (overflowed) {
+            float contentBottomLimit = contactTop - contactGap;
+            float addMeasuredH = (hasAdditional && additionalLayout != null) ? additionalLayout.getHeight() : 0f;
+            float minAddReserve = hasAdditional ? Math.min(addMeasuredH, 260f) : 0f;
+            float belowPanelFixed = (hasDagKhatianRow ? dagGap + dagRowH : 0f) + (hasAdditional ? addGap : 0f);
+            float maxPanelBottom = Math.max(panelTop + 220f, contentBottomLimit - belowPanelFixed - minAddReserve);
+            float clampedPanelBottom = Math.min(panelTop + panelH, maxPanelBottom);
+            panelH = Math.max(220f, clampedPanelBottom - panelTop);
+
+            float curBottom = panelTop + panelH;
+            if (hasDagKhatianRow) {
+                float dagTop = curBottom + dagGap;
+                dagKhatianRect = new RectF(cardLeft, dagTop, cardRight, dagTop + dagRowH);
+                curBottom = dagKhatianRect.bottom;
+            }
+            if (hasAdditional) {
+                addTopY = curBottom + addGap;
+            }
+        }
+
+        RectF panelRect = new RectF(cardLeft, panelTop, cardRight, panelTop + panelH);
+        float drawIllustH = Math.min(illustH, Math.max(120f, panelH - 36f));
+        float drawIllustW = illustW * (drawIllustH / illustH);
+        float illustLeft = hasMainFields ? (cardLeft + illustPad) : (canvasWidth / 2f - drawIllustW / 2f);
+        float illustTop = panelRect.top + (panelH - drawIllustH) / 2f;
+        RectF illustRect = new RectF(illustLeft, illustTop, illustLeft + drawIllustW, illustTop + drawIllustH);
 
         List<TextBlockPlacement> mainBlocks = new ArrayList<>(mainLayouts.size());
-        float innerAvailH = panelH - panelPadV * 2f;
+        float innerAvailH = Math.max(0f, panelH - panelPadV * 2f);
         float curY = panelRect.top + panelPadV + Math.max(0f, (innerAvailH - mainTextTotalH) / 2f);
         for (int i = 0; i < mainPanelFields.size(); i++) {
             StaticLayout l = mainLayouts.get(i);
@@ -520,84 +735,7 @@ public final class DynamicPosterLayoutEngine {
             curY += l.getHeight() + mainFieldGap;
         }
 
-        float cursorBottomY = panelRect.bottom;
-
-        boolean hasDag = dagField != null && !dagField.isEmpty();
-        boolean hasKhatian = khatianField != null && !khatianField.isEmpty();
-        boolean hasDagKhatianRow = hasDag || hasKhatian;
-        RectF dagKhatianRect = new RectF();
-        StaticLayout dagLayout = null;
-        StaticLayout khatianLayout = null;
-
-        if (hasDagKhatianRow) {
-            float dagTop = cursorBottomY + 18f;
-            int sideMaxW = Math.round((hasDag && hasKhatian) ? (cardWidth / 2f - 44f) : (cardWidth - 72f));
-            TextPaint dagPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
-            dagPaint.setColor(theme.getDetailsTextColor());
-            dagPaint.setTypeface(paragraphTypeface);
-            dagPaint.setTextSize(44f);
-
-            int maxDagH = 0;
-            if (hasDag) {
-                SpannableStringBuilder sb = buildInlineFieldSpannable(dagField, paragraphTypeface);
-                dagLayout = StaticLayout.Builder
-                        .obtain(sb, 0, sb.length(), dagPaint, sideMaxW)
-                        .setAlignment(Layout.Alignment.ALIGN_CENTER)
-                        .setLineSpacing(0f, 1.12f)
-                        .setIncludePad(true)
-                        .build();
-                maxDagH = Math.max(maxDagH, dagLayout.getHeight());
-            }
-            if (hasKhatian) {
-                SpannableStringBuilder sb = buildInlineFieldSpannable(khatianField, paragraphTypeface);
-                khatianLayout = StaticLayout.Builder
-                        .obtain(sb, 0, sb.length(), dagPaint, sideMaxW)
-                        .setAlignment(Layout.Alignment.ALIGN_CENTER)
-                        .setLineSpacing(0f, 1.12f)
-                        .setIncludePad(true)
-                        .build();
-                maxDagH = Math.max(maxDagH, khatianLayout.getHeight());
-            }
-            float rowH = Math.max(76f, maxDagH + 22f);
-            dagKhatianRect = new RectF(cardLeft, dagTop, cardRight, dagTop + rowH);
-            cursorBottomY = dagKhatianRect.bottom;
-        }
-
-        boolean hasAdditional = additionalField != null && !additionalField.isEmpty();
-        StaticLayout additionalLayout = null;
-        float addTopY = 0f;
-        float addLeftX = cardLeft + 22f;
-
-        if (hasAdditional) {
-            addTopY = cursorBottomY + 16f;
-            float addFontSize = additionalField.getPlainText().length() > 260 ? 36f : 40f;
-            TextPaint addPaint = new TextPaint(TextPaint.ANTI_ALIAS_FLAG);
-            addPaint.setColor(theme.getDetailsTextColor());
-            addPaint.setTypeface(paragraphTypeface);
-            addPaint.setTextSize(addFontSize);
-
-            int addMaxW = Math.round(cardWidth - 44f);
-            SpannableStringBuilder sb = buildInlineFieldSpannable(additionalField, paragraphTypeface);
-            additionalLayout = StaticLayout.Builder
-                    .obtain(sb, 0, sb.length(), addPaint, addMaxW)
-                    .setAlignment(Layout.Alignment.ALIGN_CENTER)
-                    .setLineSpacing(0f, 1.15f)
-                    .setIncludePad(true)
-                    .build();
-            if (additionalLayout.getLineCount() > 2) {
-                additionalLayout = StaticLayout.Builder
-                        .obtain(sb, 0, sb.length(), addPaint, addMaxW)
-                        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                        .setLineSpacing(0f, 1.15f)
-                        .setIncludePad(true)
-                        .build();
-            }
-            cursorBottomY = addTopY + additionalLayout.getHeight();
-        }
-
-        float contactTop = cursorBottomY + 18f;
-        RectF contactRect = new RectF(cardLeft, contactTop, cardRight, contactTop + CONTACT_HEIGHT_PX);
-        int totalHeight = Math.round(contactRect.bottom + 44f);
+        RectF contactRect = new RectF(cardLeft, contactTop, cardRight, contactBottom);
         RectF outerRect = new RectF(
                 OUTER_MARGIN_PX,
                 OUTER_MARGIN_PX,
@@ -627,7 +765,8 @@ public final class DynamicPosterLayoutEngine {
                 additionalLayout,
                 addTopY,
                 addLeftX,
-                contactRect
+                contactRect,
+                overflowed
         );
     }
 

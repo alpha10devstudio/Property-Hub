@@ -134,4 +134,13 @@ public class DetailsParagraphParserTest {
         GeometryMetrics expanded = DynamicPosterLayoutEngine.computeGeometryMetrics(1440, 1920, 960f);
         assertTrue(compact.getDetailsCardHeight() < expanded.getDetailsCardHeight());
     }
+
+    @Test
+    public void clampPosterHeightEnforcesMinAndMaxBounds() {
+        assertEquals(2160, DynamicPosterLayoutEngine.MAX_POSTER_HEIGHT_PX);
+        assertEquals(480, DynamicPosterLayoutEngine.clampPosterHeight(120));
+        assertEquals(980, DynamicPosterLayoutEngine.clampPosterHeight(980));
+        assertEquals(2160, DynamicPosterLayoutEngine.clampPosterHeight(2160));
+        assertEquals(2160, DynamicPosterLayoutEngine.clampPosterHeight(4800));
+    }
 }

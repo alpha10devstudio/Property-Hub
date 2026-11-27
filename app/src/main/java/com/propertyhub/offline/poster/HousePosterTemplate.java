@@ -61,7 +61,7 @@ public final class HousePosterTemplate {
     ) {
         PosterThemeConfig theme = PosterThemeConfig.houseForRent();
         int navyBlue = theme.getPrimaryColor();
-        Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
+        Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
 
         // 1. Crisp White Background & Navy Blue Rounded Outer Border
         canvas.drawColor(theme.getCanvasBackgroundColor());
@@ -139,12 +139,20 @@ public final class HousePosterTemplate {
                     dividerPaint
             );
 
+            canvas.save();
+            canvas.clipRect(
+                    plan.dividerX + 6f,
+                    plan.panelRect.top + 14f,
+                    plan.panelRect.right - 14f,
+                    plan.panelRect.bottom - 14f
+            );
             for (DynamicPosterLayoutEngine.TextBlockPlacement block : plan.textBlocks) {
                 canvas.save();
                 canvas.translate(block.x, block.y);
                 block.layout.draw(canvas);
                 canvas.restore();
             }
+            canvas.restore();
         }
 
         // 5. Bottom Navy Blue Contact Banner
@@ -205,7 +213,7 @@ public final class HousePosterTemplate {
                 mobilePaint
         );
 
-        return false;
+        return plan.overflowed;
     }
 
     private static void drawTopRoofEmblem(

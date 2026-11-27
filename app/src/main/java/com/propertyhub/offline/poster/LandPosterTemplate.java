@@ -65,7 +65,7 @@ public final class LandPosterTemplate {
     ) {
         PosterThemeConfig theme = PosterThemeConfig.landForSale();
         int green = theme.getPrimaryColor();
-        Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
+        Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
 
         // 1. Crisp White Canvas & Green Rounded Outer Border
         canvas.drawColor(theme.getCanvasBackgroundColor());
@@ -136,12 +136,20 @@ public final class LandPosterTemplate {
                     dividerPaint
             );
 
+            canvas.save();
+            canvas.clipRect(
+                    plan.dividerX + 6f,
+                    plan.panelRect.top + 12f,
+                    plan.panelRect.right - 12f,
+                    plan.panelRect.bottom - 12f
+            );
             for (DynamicPosterLayoutEngine.TextBlockPlacement block : plan.mainBlocks) {
                 canvas.save();
                 canvas.translate(block.x, block.y);
                 block.layout.draw(canvas);
                 canvas.restore();
             }
+            canvas.restore();
         }
 
         // 5. Optional Separate Rounded Green-Bordered Dag & Khatian Row
@@ -154,6 +162,13 @@ public final class LandPosterTemplate {
             borderPaint.setStrokeWidth(4.5f);
             canvas.drawRoundRect(dkRect, 28f, 28f, borderPaint);
 
+            canvas.save();
+            canvas.clipRect(
+                    plan.dagKhatianRect.left + 8f,
+                    plan.dagKhatianRect.top + 6f,
+                    plan.dagKhatianRect.right - 8f,
+                    plan.dagKhatianRect.bottom - 6f
+            );
             if (plan.hasDag && plan.hasKhatian) {
                 Paint midDiv = new Paint(Paint.ANTI_ALIAS_FLAG);
                 midDiv.setColor(green);
@@ -199,11 +214,19 @@ public final class LandPosterTemplate {
                     canvas.restore();
                 }
             }
+            canvas.restore();
         }
 
         // 6. Optional Additional Info Text Below Dag/Khatian Row (Directly on White Canvas)
         if (plan.hasAdditional && plan.additionalLayout != null) {
+            float clipBottom = Math.max(plan.additionalTopY, plan.contactRect.top - 8f);
             canvas.save();
+            canvas.clipRect(
+                    plan.panelRect.left,
+                    plan.additionalTopY - 6f,
+                    plan.panelRect.right,
+                    clipBottom
+            );
             float tx = plan.additionalLayout.getLineCount() <= 2
                     ? (plan.width / 2f - plan.additionalLayout.getWidth() / 2f)
                     : plan.additionalLeftX;
@@ -270,7 +293,7 @@ public final class LandPosterTemplate {
                 mobilePaint
         );
 
-        return false;
+        return plan.overflowed;
     }
 
     private static void drawTopLandHeaderEmblem(

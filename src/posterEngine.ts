@@ -6,6 +6,12 @@ import {
   StyledSegment,
 } from './propertyCatalog';
 
+export const MIN_POSTER_HEIGHT = 480;
+export const MAX_POSTER_HEIGHT = 2160;
+const MIN_DYNAMIC_BODY_FONT_SIZE = 24;
+const MIN_LAND_ADDITIONAL_FONT_SIZE = 24;
+const MIN_LAND_DAG_FONT_SIZE = 28;
+
 export interface RenderedPosterOutput {
   dataUrl: string;
   width: number;
@@ -805,39 +811,71 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     const textRight = cardRight - 34;
     const textMaxW = textRight - textLeft;
 
-    // Auto-size typography: expand panel height first; only gently shrink font for massive walls of text
+    // Auto-size typography: expand panel height up to MAX_POSTER_HEIGHT, then shrink font/spacing before capping & flagging overflow
     let fontSize = visibleFields.length <= 2 ? 48 : 44;
     if (visibleFields.reduce((acc, f) => acc + f.plainText.length, 0) > 500) {
       fontSize = 38;
     }
-    const lineH = fontSize * 1.28;
-    const fieldGap = 20;
-
-    const measuredBlocks = visibleFields.map((fv) => {
-      const runs = buildFieldInlineRuns(fv);
-      const lines = wrapRichRuns(mctx, runs, textMaxW, fontSize, false);
-      return { fv, lines, height: lines.length * lineH };
-    });
-
-    const textTotalH =
-      measuredBlocks.reduce((sum, b) => sum + b.height, 0) +
-      Math.max(0, measuredBlocks.length - 1) * fieldGap;
-
-    const hasFields = measuredBlocks.length > 0;
+    let lineMult = 1.28;
+    let fieldGap = 20;
+    let padV = 34;
+    const hasFields = visibleFields.length > 0;
     const minPanelH = hasFields ? 316 : 256;
-    const padV = 34;
-    const panelH = Math.max(minPanelH, Math.round(textTotalH + padV * 2));
+    const bottomReserve = 24 + contactH + 46;
+
+    let lineH = fontSize * lineMult;
+    let measuredBlocks: Array<{ fv: PropertyFieldValue; lines: RichRun[][]; height: number }> = [];
+    let textTotalH = 0;
+    let panelH = minPanelH;
+    let rawTotalHeight = 0;
+
+    while (true) {
+      lineH = fontSize * lineMult;
+      measuredBlocks = visibleFields.map((fv) => {
+        const runs = buildFieldInlineRuns(fv);
+        const lines = wrapRichRuns(mctx, runs, textMaxW, fontSize, false);
+        return { fv, lines, height: lines.length * lineH };
+      });
+
+      textTotalH =
+        measuredBlocks.reduce((sum, b) => sum + b.height, 0) +
+        Math.max(0, measuredBlocks.length - 1) * fieldGap;
+
+      panelH = Math.max(minPanelH, Math.round(textTotalH + padV * 2));
+      rawTotalHeight = Math.round(panelTop + panelH + bottomReserve);
+
+      if (rawTotalHeight <= MAX_POSTER_HEIGHT) {
+        break;
+      }
+      if (fontSize > MIN_DYNAMIC_BODY_FONT_SIZE) {
+        fontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE, fontSize - 2);
+        fieldGap = Math.max(10, fieldGap - 1);
+        padV = Math.max(24, padV - 1);
+      } else if (lineMult > 1.16) {
+        lineMult = 1.16;
+        fieldGap = 10;
+        padV = 22;
+      } else {
+        break;
+      }
+    }
+
+    const overflowed = rawTotalHeight > MAX_POSTER_HEIGHT;
+    const maxAllowedPanelH = Math.max(200, MAX_POSTER_HEIGHT - bottomReserve - panelTop);
+    if (overflowed) {
+      panelH = Math.min(panelH, maxAllowedPanelH);
+    }
     const panelBottom = panelTop + panelH;
 
     const contactTop = panelBottom + 24;
     const contactBottom = contactTop + contactH;
-    const totalHeight = Math.round(contactBottom + 46);
+    const totalHeight = Math.max(MIN_POSTER_HEIGHT, Math.min(MAX_POSTER_HEIGHT, Math.round(contactBottom + 46)));
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = totalHeight;
     const ctx = canvas.getContext('2d');
-    if (!ctx) return { dataUrl: '', width: W, height: totalHeight, overflowed: false };
+    if (!ctx) return { dataUrl: '', width: W, height: totalHeight, overflowed };
 
     // 1. Crisp White Canvas & Navy Outer Rounded Border
     ctx.fillStyle = '#FFFFFF';
@@ -896,10 +934,15 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       ctx.lineTo(dividerX, panelBottom - 26);
       ctx.stroke();
 
-      // Right Text Pane (No internal cards — crisp continuous layout)
+      // Right Text Pane (clipped cleanly inside panel bounds)
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(dividerX + 6, panelTop + 14, cardRight - dividerX - 20, Math.max(0, panelH - 28));
+      ctx.clip();
+
       ctx.textAlign = 'left';
       ctx.textBaseline = 'alphabetic';
-      const innerAvailH = panelH - padV * 2;
+      const innerAvailH = Math.max(0, panelH - padV * 2);
       let cursorY = panelTop + padV + Math.max(0, (innerAvailH - textTotalH) / 2);
 
       for (const block of measuredBlocks) {
@@ -910,6 +953,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
         }
         cursorY += fieldGap;
       }
+      ctx.restore();
     } else {
       // All optional body fields empty -> centered compact house illustration cleanly inside panel
       drawHousePanelIllustration(
@@ -969,7 +1013,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       dataUrl: canvas.toDataURL('image/jpeg', 0.92),
       width: W,
       height: totalHeight,
-      overflowed: false,
+      overflowed,
     };
   }
 
@@ -984,7 +1028,6 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   const panelTop = titleBottom + 20;
 
   // Separate Dag, Khatian, and Additional Info per Reference Image 2 structure
-  // Any future fields added to LAND_FIELDS automatically flow into mainPanelFields!
   const dagField = visibleFields.find((f) => f.fieldId === 'dag_number');
   const khatianField = visibleFields.find((f) => f.fieldId === 'khatian_number');
   const additionalField = visibleFields.find((f) => f.fieldId === 'additional_info');
@@ -995,7 +1038,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       f.fieldId !== 'additional_info'
   );
 
-  // Measure Main Central Panel
+  // Measure Main Central Panel + Dag/Khatian + Additional Info with shrink-to-fit & MAX_POSTER_HEIGHT cap
   const illustPad = 18;
   const illustW = 368;
   const illustH = 258;
@@ -1004,92 +1047,169 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   const textRight = cardRight - 28;
   const textMaxW = textRight - textLeft;
 
-  const totalMainChars = mainPanelFields.reduce((s, f) => s + f.plainText.length, 0);
-  let mainFontSize = mainPanelFields.length <= 4 && totalMainChars <= 180 ? 45 : 41;
-  if (totalMainChars > 460) mainFontSize = 36;
-  const mainLineH = mainFontSize * 1.24;
-  const mainFieldGap = 12;
-
-  const measuredMainBlocks = mainPanelFields.map((fv) => {
-    const runs = buildFieldInlineRuns(fv);
-    const lines = wrapRichRuns(mctx, runs, textMaxW, mainFontSize, false);
-    return { fv, lines, height: lines.length * mainLineH };
-  });
-
-  const mainTextTotalH =
-    measuredMainBlocks.reduce((s, b) => s + b.height, 0) +
-    Math.max(0, measuredMainBlocks.length - 1) * mainFieldGap;
-
-  const hasMainFields = measuredMainBlocks.length > 0;
-  const panelPadV = 22;
-  const panelH = Math.max(illustH + panelPadV * 2, Math.round(mainTextTotalH + panelPadV * 2));
-  const panelBottom = panelTop + panelH;
-
-  let cursorBottomY = panelBottom;
-
-  // Measure Separate Dag & Khatian Pill Row (omitted completely if both empty)
+  const hasMainFields = mainPanelFields.length > 0;
   const hasDag = Boolean(dagField && dagField.plainText.trim());
   const hasKhatian = Boolean(khatianField && khatianField.plainText.trim());
   const hasDagKhatianRow = hasDag || hasKhatian;
+  const hasAdditional = Boolean(additionalField && additionalField.plainText.trim());
 
+  const totalMainChars = mainPanelFields.reduce((s, f) => s + f.plainText.length, 0);
+  let mainFontSize = mainPanelFields.length <= 4 && totalMainChars <= 180 ? 45 : 41;
+  if (totalMainChars > 460) mainFontSize = 36;
+  let mainLineMult = 1.24;
+  let mainFieldGap = 12;
+  let panelPadV = 22;
+
+  let dagFontSize = 44;
+  let addFontSize = additionalField && additionalField.plainText.length > 260 ? 36 : 40;
+  let addLineMult = 1.24;
+  let dagGap = 18;
+  let addGap = 16;
+  let contactGap = 18;
+  const bottomMargin = 44;
+
+  let mainLineH = mainFontSize * mainLineMult;
+  let measuredMainBlocks: Array<{ fv: PropertyFieldValue; lines: RichRun[][]; height: number }> = [];
+  let mainTextTotalH = 0;
+  let panelH = illustH + panelPadV * 2;
   let dagRowTop = 0;
   let dagRowH = 0;
   let dagLines: RichRun[][] = [];
   let khatianLines: RichRun[][] = [];
-  const dagFontSize = 44;
-  const dagLineH = dagFontSize * 1.22;
-
-  if (hasDagKhatianRow) {
-    dagRowTop = cursorBottomY + 18;
-    const singleSideMaxW = hasDag && hasKhatian ? cardW / 2 - 44 : cardW - 72;
-    if (hasDag && dagField) {
-      dagLines = wrapRichRuns(mctx, buildFieldInlineRuns(dagField), singleSideMaxW, dagFontSize, false);
-    }
-    if (hasKhatian && khatianField) {
-      khatianLines = wrapRichRuns(
-        mctx,
-        buildFieldInlineRuns(khatianField),
-        singleSideMaxW,
-        dagFontSize,
-        false
-      );
-    }
-    const maxLines = Math.max(dagLines.length, khatianLines.length, 1);
-    dagRowH = Math.max(76, Math.round(maxLines * dagLineH + 22));
-    cursorBottomY = dagRowTop + dagRowH;
-  }
-
-  // Measure Additional Information Row below Dag/Khatian (omitted completely if empty)
-  const hasAdditional = Boolean(additionalField && additionalField.plainText.trim());
+  let dagLineH = dagFontSize * 1.22;
   let addTop = 0;
   let addLines: RichRun[][] = [];
-  let addFontSize = 40;
-  const addMaxW = cardW - 44;
-  if (hasAdditional && additionalField) {
-    addTop = cursorBottomY + 16;
-    if (additionalField.plainText.length > 260) {
-      addFontSize = 36;
+  let addLineH = addFontSize * addLineMult;
+  let addTotalH = 0;
+  let rawTotalHeight = 0;
+  let triedTightPass = false;
+
+  while (true) {
+    mainLineH = mainFontSize * mainLineMult;
+    measuredMainBlocks = mainPanelFields.map((fv) => {
+      const runs = buildFieldInlineRuns(fv);
+      const lines = wrapRichRuns(mctx, runs, textMaxW, mainFontSize, false);
+      return { fv, lines, height: lines.length * mainLineH };
+    });
+
+    mainTextTotalH =
+      measuredMainBlocks.reduce((s, b) => s + b.height, 0) +
+      Math.max(0, measuredMainBlocks.length - 1) * mainFieldGap;
+
+    panelH = Math.max(illustH + panelPadV * 2, Math.round(mainTextTotalH + panelPadV * 2));
+    let cursorBottomY = panelTop + panelH;
+
+    dagRowTop = 0;
+    dagRowH = 0;
+    dagLines = [];
+    khatianLines = [];
+    dagLineH = dagFontSize * 1.22;
+
+    if (hasDagKhatianRow) {
+      dagRowTop = cursorBottomY + dagGap;
+      const singleSideMaxW = hasDag && hasKhatian ? cardW / 2 - 44 : cardW - 72;
+      if (hasDag && dagField) {
+        dagLines = wrapRichRuns(mctx, buildFieldInlineRuns(dagField), singleSideMaxW, dagFontSize, false);
+      }
+      if (hasKhatian && khatianField) {
+        khatianLines = wrapRichRuns(
+          mctx,
+          buildFieldInlineRuns(khatianField),
+          singleSideMaxW,
+          dagFontSize,
+          false
+        );
+      }
+      const maxLines = Math.max(dagLines.length, khatianLines.length, 1);
+      dagRowH = Math.min(180, Math.max(76, Math.round(maxLines * dagLineH + 22)));
+      cursorBottomY = dagRowTop + dagRowH;
     }
-    addLines = wrapRichRuns(
-      mctx,
-      buildFieldInlineRuns(additionalField),
-      addMaxW,
-      addFontSize,
-      false
-    );
-    const addLineH = addFontSize * 1.24;
-    cursorBottomY = addTop + Math.round(addLines.length * addLineH);
+
+    addTop = 0;
+    addLines = [];
+    addLineH = addFontSize * addLineMult;
+    addTotalH = 0;
+    if (hasAdditional && additionalField) {
+      addTop = cursorBottomY + addGap;
+      const addMaxW = cardW - 44;
+      addLines = wrapRichRuns(
+        mctx,
+        buildFieldInlineRuns(additionalField),
+        addMaxW,
+        addFontSize,
+        false
+      );
+      addTotalH = Math.round(addLines.length * addLineH);
+      cursorBottomY = addTop + addTotalH;
+    }
+
+    rawTotalHeight = Math.round(cursorBottomY + contactGap + contactH + bottomMargin);
+    if (rawTotalHeight <= MAX_POSTER_HEIGHT) {
+      break;
+    }
+
+    let shrunk = false;
+    if (hasMainFields && mainFontSize > MIN_DYNAMIC_BODY_FONT_SIZE) {
+      mainFontSize = Math.max(MIN_DYNAMIC_BODY_FONT_SIZE, mainFontSize - 2);
+      mainFieldGap = Math.max(6, mainFieldGap - 0.5);
+      panelPadV = Math.max(16, panelPadV - 0.5);
+      shrunk = true;
+    }
+    if (hasAdditional && addFontSize > MIN_LAND_ADDITIONAL_FONT_SIZE) {
+      addFontSize = Math.max(MIN_LAND_ADDITIONAL_FONT_SIZE, addFontSize - 2);
+      shrunk = true;
+    }
+    if (hasDagKhatianRow && dagFontSize > MIN_LAND_DAG_FONT_SIZE && dagRowH > 76) {
+      dagFontSize = Math.max(MIN_LAND_DAG_FONT_SIZE, dagFontSize - 2);
+      shrunk = true;
+    }
+
+    if (!shrunk) {
+      if (!triedTightPass) {
+        triedTightPass = true;
+        mainLineMult = 1.14;
+        addLineMult = 1.14;
+        dagGap = 12;
+        addGap = 12;
+        contactGap = 14;
+        panelPadV = 16;
+        mainFieldGap = 6;
+      } else {
+        break;
+      }
+    }
   }
 
-  const contactTop = cursorBottomY + 18;
-  const contactBottom = contactTop + contactH;
-  const totalHeight = Math.round(contactBottom + 44);
+  const overflowed = rawTotalHeight > MAX_POSTER_HEIGHT;
+  const totalHeight = Math.max(MIN_POSTER_HEIGHT, Math.min(MAX_POSTER_HEIGHT, rawTotalHeight));
+  const contactBottom = overflowed ? totalHeight - bottomMargin : rawTotalHeight - bottomMargin;
+  const contactTop = contactBottom - contactH;
+
+  if (overflowed) {
+    const contentBottomLimit = contactTop - contactGap;
+    const minAddReserve = hasAdditional ? Math.min(addTotalH, 260) : 0;
+    const belowPanelFixed = (hasDagKhatianRow ? dagGap + dagRowH : 0) + (hasAdditional ? addGap : 0);
+    const maxPanelBottom = Math.max(panelTop + 220, contentBottomLimit - belowPanelFixed - minAddReserve);
+    const clampedPanelBottom = Math.min(panelTop + panelH, maxPanelBottom);
+    panelH = Math.max(220, clampedPanelBottom - panelTop);
+
+    let curBottom = panelTop + panelH;
+    if (hasDagKhatianRow) {
+      dagRowTop = curBottom + dagGap;
+      curBottom = dagRowTop + dagRowH;
+    }
+    if (hasAdditional) {
+      addTop = curBottom + addGap;
+    }
+  }
+
+  const panelBottom = panelTop + panelH;
 
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = totalHeight;
   const ctx = canvas.getContext('2d');
-  if (!ctx) return { dataUrl: '', width: W, height: totalHeight, overflowed: false };
+  if (!ctx) return { dataUrl: '', width: W, height: totalHeight, overflowed };
 
   // 1. Crisp White Canvas & Green Rounded Outer Border
   ctx.fillStyle = '#FFFFFF';
@@ -1128,12 +1248,15 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
   ctx.lineWidth = 5;
   ctx.stroke();
 
+  const drawIllustH = Math.min(illustH, Math.max(120, panelH - 36));
+  const drawIllustW = illustW * (drawIllustH / illustH);
+
   if (hasMainFields) {
     // Left Pasture Illustration (aspect-preserved, vertically centered)
-    const illustTop = panelTop + (panelH - illustH) / 2;
+    const illustTop = panelTop + (panelH - drawIllustH) / 2;
     drawLandPastureScene(
       ctx,
-      { left: cardLeft + illustPad, top: illustTop, width: illustW, height: illustH },
+      { left: cardLeft + illustPad, top: illustTop, width: drawIllustW, height: drawIllustH },
       GREEN
     );
 
@@ -1146,10 +1269,15 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     ctx.lineTo(dividerX, panelBottom - 20);
     ctx.stroke();
 
-    // Right Pane Dynamic Fields (No internal cards)
+    // Right Pane Dynamic Fields (clipped cleanly inside panel bounds)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dividerX + 6, panelTop + 12, cardRight - dividerX - 18, Math.max(0, panelH - 24));
+    ctx.clip();
+
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
-    const innerAvailH = panelH - panelPadV * 2;
+    const innerAvailH = Math.max(0, panelH - panelPadV * 2);
     let curY = panelTop + panelPadV + Math.max(0, (innerAvailH - mainTextTotalH) / 2);
 
     for (const block of measuredMainBlocks) {
@@ -1160,12 +1288,13 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       }
       curY += mainFieldGap;
     }
+    ctx.restore();
   } else {
     // Edge case: only Dag/Khatian or Additional info filled, or everything optional empty
-    const illustTop = panelTop + (panelH - illustH) / 2;
+    const illustTop = panelTop + (panelH - drawIllustH) / 2;
     drawLandPastureScene(
       ctx,
-      { left: W / 2 - illustW / 2, top: illustTop, width: illustW, height: illustH },
+      { left: W / 2 - drawIllustW / 2, top: illustTop, width: drawIllustW, height: drawIllustH },
       GREEN
     );
   }
@@ -1179,6 +1308,11 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     ctx.strokeStyle = GREEN;
     ctx.lineWidth = 4.5;
     ctx.stroke();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cardLeft + 8, dagRowTop + 6, cardW - 16, Math.max(0, dagRowH - 12));
+    ctx.clip();
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
@@ -1194,7 +1328,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
 
       const drawCenteredSlot = (slotLines: RichRun[][], slotLeft: number, slotW: number) => {
         const blockH = slotLines.length * dagLineH;
-        let y = dagRowTop + (dagRowH - blockH) / 2;
+        let y = dagRowTop + Math.max(10, (dagRowH - blockH) / 2);
         for (const line of slotLines) {
           const lineW = measureRichLineWidth(ctx, line, dagFontSize);
           const x = slotLeft + Math.max(12, (slotW - lineW) / 2);
@@ -1216,7 +1350,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     } else {
       const onlyLines = hasDag ? dagLines : khatianLines;
       const blockH = onlyLines.length * dagLineH;
-      let y = dagRowTop + (dagRowH - blockH) / 2;
+      let y = dagRowTop + Math.max(10, (dagRowH - blockH) / 2);
       for (const line of onlyLines) {
         const lineW = measureRichLineWidth(ctx, line, dagFontSize);
         const x = cardLeft + Math.max(24, (cardW - lineW) / 2);
@@ -1232,11 +1366,17 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
         y += dagLineH;
       }
     }
+    ctx.restore();
   }
 
-  // 6. Additional Info Section (centered when short, wrapped cleanly when long)
+  // 6. Additional Info Section (centered when short, wrapped cleanly when long, clipped above contact banner)
   if (hasAdditional && addLines.length > 0) {
-    const addLineH = addFontSize * 1.24;
+    const clipBottom = Math.max(addTop, contactTop - 8);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(cardLeft, addTop - 6, cardW, Math.max(0, clipBottom - (addTop - 6)));
+    ctx.clip();
+
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     let y = addTop;
@@ -1257,6 +1397,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
       );
       y += addLineH;
     }
+    ctx.restore();
   }
 
   // 7. Bottom Dark Green Contact Banner
@@ -1306,7 +1447,7 @@ export function renderDynamicPoster(record: PropertyRecord): RenderedPosterOutpu
     dataUrl: canvas.toDataURL('image/jpeg', 0.92),
     width: W,
     height: totalHeight,
-    overflowed: false,
+    overflowed,
   };
 }
 
