@@ -129,7 +129,10 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
             String timePart = (item.getLinkedRecord() != null && !item.getLinkedRecord().getTime().isEmpty())
                     ? " · " + item.getLinkedRecord().getTime()
                     : "";
-            tvMeta.setText("Date: " + item.getRecordDate() + timePart + "  ·  TXT: " + item.getSourceTxtFile());
+            String dimsPart = (item.getImageWidth() > 0 && item.getImageHeight() > 0)
+                    ? "  ·  " + item.getImageWidth() + "×" + item.getImageHeight() + "px"
+                    : "";
+            tvMeta.setText("Date: " + item.getRecordDate() + timePart + dimsPart + "  ·  TXT: " + item.getSourceTxtFile());
 
             String key = item.getFileUri().toString();
             ivThumb.setTag(key);
@@ -161,14 +164,37 @@ public class PostersAdapter extends RecyclerView.Adapter<PostersAdapter.PosterVi
         }
 
         private static Bitmap decodeThumbnail(@NonNull Context context, @NonNull Uri uri) {
-            try (InputStream in = context.getContentResolver().openInputStream(uri)) {
-                if (in == null) {
-                    return null;
+            try {
+                BitmapFactory.Options boundsOpts = new BitmapFactory.Options();
+                boundsOpts.inJustDecodeBounds = true;
+                try (InputStream boundsIn = context.getContentResolver().openInputStream(uri)) {
+                    if (boundsIn == null) {
+                        return null;
+                    }
+                    BitmapFactory.decodeStream(boundsIn, null, boundsOpts);
                 }
-                BitmapFactory.Options opts = new BitmapFactory.Options();
-                opts.inSampleSize = 4; // 1440x1920 -> 360x480 portrait thumbnail
-                opts.inPreferredConfig = Bitmap.Config.RGB_565;
-                return BitmapFactory.decodeStream(in, null, opts);
+
+                int sampleSize = 1;
+                if (boundsOpts.outWidth > 0 && boundsOpts.outHeight > 0) {
+                    int targetWidth = 480;
+                    int targetMaxHeight = 1400;
+                    while ((boundsOpts.outWidth / (sampleSize * 2)) >= targetWidth
+                            || (boundsOpts.outHeight / sampleSize) > targetMaxHeight) {
+                        sampleSize *= 2;
+                    }
+                } else {
+                    sampleSize = 4;
+                }
+
+                try (InputStream in = context.getContentResolver().openInputStream(uri)) {
+                    if (in == null) {
+                        return null;
+                    }
+                    BitmapFactory.Options opts = new BitmapFactory.Options();
+                    opts.inSampleSize = sampleSize;
+                    opts.inPreferredConfig = Bitmap.Config.RGB_565;
+                    return BitmapFactory.decodeStream(in, null, opts);
+                }
             } catch (Exception e) {
                 return null;
             }

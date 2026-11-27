@@ -544,7 +544,7 @@ public class CategoryFormPageFragment extends Fragment {
         Button btnShare = view.findViewById(R.id.btnPreviewShare);
 
         title.setText("Long Content Review · " + record.getRecordId());
-        sub.setText("TXT saved cleanly, and the 1440×1920 portrait poster was auto-scaled. Please review the layout.");
+        sub.setText("TXT saved cleanly, and the dynamic-height poster was adjusted to fit all content. Please review the layout.");
         btnShare.setVisibility(View.GONE);
         iv.setImageURI(posterUri);
 

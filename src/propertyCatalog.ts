@@ -47,6 +47,8 @@ export interface PosterEntry {
   time: string;
   sourceTxtFile: string;
   dataUrl: string;
+  width: number;
+  height: number;
   createdAt: number;
 }
 
@@ -81,7 +83,7 @@ export const HOUSE_FIELDS: PropertyFieldConfig[] = [
     defaultValue: '',
     placeholder: 'রুম সংখ্যা, সুবিধা, ভাড়া ইত্যাদি লিখুন',
     inputType: 'MULTILINE',
-    required: true,
+    required: false,
     formattable: true,
     displayOrder: 2,
     showOnPosterBody: true,

@@ -16,13 +16,15 @@
         android:layout_height="wrap_content"
         android:orientation="vertical">
 
-        <!-- 3:4 Portrait Thumbnail Preview -->
+        <!-- Dynamic Aspect-Ratio Thumbnail Preview -->
         <ImageView
             android:id="@+id/ivPosterThumb"
             android:layout_width="match_parent"
-            android:layout_height="240dp"
-            android:background="#0F172A"
+            android:layout_height="wrap_content"
+            android:adjustViewBounds="true"
+            android:background="#F8FAFC"
             android:contentDescription="@null"
+            android:maxHeight="360dp"
             android:scaleType="fitCenter" />
 
         <LinearLayout

@@ -1050,13 +1050,31 @@ public class GeneratedFilesFragment extends Fragment {
 
     @Nullable
     private Bitmap decodeFullPosterSafely(@NonNull Context context, @NonNull Uri uri) {
-        try (InputStream in = context.getContentResolver().openInputStream(uri)) {
-            if (in == null) {
-                return null;
+        try {
+            BitmapFactory.Options boundsOpts = new BitmapFactory.Options();
+            boundsOpts.inJustDecodeBounds = true;
+            try (InputStream boundsIn = context.getContentResolver().openInputStream(uri)) {
+                if (boundsIn == null) {
+                    return null;
+                }
+                BitmapFactory.decodeStream(boundsIn, null, boundsOpts);
             }
-            BitmapFactory.Options opts = new BitmapFactory.Options();
-            opts.inSampleSize = 1;
-            return BitmapFactory.decodeStream(in, null, opts);
+
+            int sampleSize = 1;
+            if (boundsOpts.outHeight > 3600 || boundsOpts.outWidth > 2048) {
+                while ((boundsOpts.outHeight / sampleSize) > 3600 || (boundsOpts.outWidth / sampleSize) > 2048) {
+                    sampleSize *= 2;
+                }
+            }
+
+            try (InputStream in = context.getContentResolver().openInputStream(uri)) {
+                if (in == null) {
+                    return null;
+                }
+                BitmapFactory.Options opts = new BitmapFactory.Options();
+                opts.inSampleSize = sampleSize;
+                return BitmapFactory.decodeStream(in, null, opts);
+            }
         } catch (OutOfMemoryError oom) {
             try (InputStream retry = context.getContentResolver().openInputStream(uri)) {
                 if (retry == null) {

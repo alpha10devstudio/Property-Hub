@@ -61,7 +61,7 @@
     <string name="tab_posters">Posters</string>
     <string name="tab_zip_exports">ZIP Exports</string>
     <string name="bulk_generator_title">Bulk Poster Generator</string>
-    <string name="bulk_generator_subtitle">Generate 3:4 portrait JPG posters from saved TXT records without re-entering data.</string>
+    <string name="bulk_generator_subtitle">Generate dynamic-height JPG posters from saved TXT records without re-entering data.</string>
     <string name="start_generation">Start Generation</string>
     <string name="cancel_generation">Cancel</string>
     <string name="retry_failed">Retry Failed</string>

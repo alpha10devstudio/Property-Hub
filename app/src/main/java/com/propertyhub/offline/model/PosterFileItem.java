@@ -14,6 +14,8 @@ public class PosterFileItem {
     private final String sourceTxtFile;
     private final Uri fileUri;
     private final long lastModifiedMillis;
+    private final int imageWidth;
+    private final int imageHeight;
     @Nullable
     private final PropertyRecord linkedRecord;
 
@@ -27,6 +29,21 @@ public class PosterFileItem {
             long lastModifiedMillis,
             @Nullable PropertyRecord linkedRecord
     ) {
+        this(category, fileName, recordId, recordDate, sourceTxtFile, fileUri, lastModifiedMillis, 0, 0, linkedRecord);
+    }
+
+    public PosterFileItem(
+            @NonNull PropertyCategory category,
+            @NonNull String fileName,
+            @NonNull String recordId,
+            @NonNull String recordDate,
+            @NonNull String sourceTxtFile,
+            @NonNull Uri fileUri,
+            long lastModifiedMillis,
+            int imageWidth,
+            int imageHeight,
+            @Nullable PropertyRecord linkedRecord
+    ) {
         this.category = category;
         this.fileName = fileName;
         this.recordId = recordId;
@@ -34,6 +51,8 @@ public class PosterFileItem {
         this.sourceTxtFile = sourceTxtFile;
         this.fileUri = fileUri;
         this.lastModifiedMillis = lastModifiedMillis;
+        this.imageWidth = imageWidth;
+        this.imageHeight = imageHeight;
         this.linkedRecord = linkedRecord;
     }
 
@@ -69,6 +88,14 @@ public class PosterFileItem {
 
     public long getLastModifiedMillis() {
         return lastModifiedMillis;
+    }
+
+    public int getImageWidth() {
+        return imageWidth;
+    }
+
+    public int getImageHeight() {
+        return imageHeight;
     }
 
     @Nullable

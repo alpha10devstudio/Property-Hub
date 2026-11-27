@@ -3,10 +3,11 @@ package com.propertyhub.offline.poster;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.DashPathEffect;
+import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -20,96 +21,200 @@ import com.propertyhub.offline.model.PropertyRecord;
 import java.util.List;
 
 /**
- * 1440x1920 (3:4 Portrait) Land for Sale Poster Template.
- * Distinct Green + White surveyor composition with double border, location pin contour header,
- * stepped emerald-trimmed Title banner, surveyed parcel plot showcase, adaptive 1/2-column dynamic cards
- * (omitting any empty fields), and shield-badge Contact card.
+ * Reference Image 2 Exact Land for Sale Poster Template (Dynamic Auto Height).
+ * Dark Green + White design featuring:
+ * - Single clean green rounded outer border
+ * - Top location pin over curved contour arcs + 2 flanking trees + tapered horizontal bars
+ * - Large dark-green rounded title banner with white title.ttf text
+ * - Central green-bordered panel (left lush green pasture illustration + vertical divider + right text)
+ * - Optional separate green-bordered Dag | Khatian pill row below
+ * - Optional Additional Information text cleanly below Dag/Khatian row
+ * - Bottom dark-green contact banner with white phone badge, separator, and contact number
  */
 public final class LandPosterTemplate {
 
     private LandPosterTemplate() {
     }
 
-    public static boolean render(
+    @NonNull
+    public static DynamicPosterLayoutEngine.LandDynamicPlan measurePlan(
             @Nullable Context context,
-            @NonNull Canvas canvas,
             @NonNull PropertyRecord record,
-            int width,
-            int height
+            int width
     ) {
         PosterThemeConfig theme = PosterThemeConfig.landForSale();
-        int forestGreen = theme.getPrimaryColor();
-        int emeraldAccent = theme.getSecondaryAccentColor();
-        int softMint = theme.getSoftSurfaceColor();
-        int cardBorder = theme.getCardBorderColor();
-
         Typeface titleTypeface = PosterFontLoader.loadTitleTypeface(context);
         Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
-
         List<PropertyFieldValue> visibleFields = record.getPosterVisibleFieldValues();
 
-        DynamicPosterLayoutEngine.PortraitLayoutPlan layout = DynamicPosterLayoutEngine.solvePortraitLayout(
+        return DynamicPosterLayoutEngine.solveLandDynamicLayout(
                 theme,
                 record.getTitle(),
                 visibleFields,
                 titleTypeface,
                 paragraphTypeface,
-                width,
-                height,
-                true,
-                false
+                width
+        );
+    }
+
+    public static boolean render(
+            @Nullable Context context,
+            @NonNull Canvas canvas,
+            @NonNull PropertyRecord record,
+            @NonNull DynamicPosterLayoutEngine.LandDynamicPlan plan
+    ) {
+        PosterThemeConfig theme = PosterThemeConfig.landForSale();
+        int green = theme.getPrimaryColor();
+        Typeface paragraphTypeface = PosterFontLoader.loadParagraphTypeface(context);
+
+        // 1. Crisp White Canvas & Green Rounded Outer Border
+        canvas.drawColor(theme.getCanvasBackgroundColor());
+
+        Paint borderPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        borderPaint.setColor(green);
+        borderPaint.setStyle(Paint.Style.STROKE);
+        borderPaint.setStrokeWidth(7f);
+        canvas.drawRoundRect(
+                plan.outerRect,
+                theme.getOuterBorderRadius(),
+                theme.getOuterBorderRadius(),
+                borderPaint
         );
 
-        // 1. Crisp White Background & Double Surveyor Outer Border
-        canvas.drawColor(theme.getCanvasBackgroundColor());
-        drawLandSurveyOuterBorder(canvas, layout.getOuterRect(), theme.getOuterBorderRadius(), forestGreen, emeraldAccent);
-
-        // 2. Top Location Pin + Surveyed Contour Header Emblem
-        drawTopLandHeaderEmblem(canvas, layout.getHeaderRect(), forestGreen, emeraldAccent);
+        // 2. Top Location Pin + Curved Contours + Flanking Trees + Tapered Bars
+        drawTopLandHeaderEmblem(canvas, plan.width, plan.headerTop, green);
 
         Paint fillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         fillPaint.setStyle(Paint.Style.FILL);
 
-        // 3. Architectural Forest Green Title Banner (Editable Title in title.ttf)
-        RectF titleRect = layout.getTitleRect();
-        fillPaint.setColor(forestGreen);
+        // 3. Dark Green Title Banner
+        fillPaint.setColor(green);
         canvas.drawRoundRect(
-                titleRect,
+                plan.titleRect,
                 theme.getTitleCornerRadius(),
                 theme.getTitleCornerRadius(),
                 fillPaint
         );
 
-        fillPaint.setColor(emeraldAccent);
-        float stripWidth = Math.min(480f, titleRect.width() * 0.38f);
-        float stripLeft = titleRect.centerX() - stripWidth / 2f;
-        canvas.drawRoundRect(
-                new RectF(stripLeft, titleRect.top + 8f, stripLeft + stripWidth, titleRect.top + 14f),
-                3f, 3f, fillPaint
-        );
-        canvas.drawRoundRect(
-                new RectF(stripLeft, titleRect.bottom - 14f, stripLeft + stripWidth, titleRect.bottom - 8f),
-                3f, 3f, fillPaint
-        );
-
-        drawDiamondMarker(canvas, titleRect.left + 64f, titleRect.centerY(), 14f, emeraldAccent, Color.WHITE);
-        drawDiamondMarker(canvas, titleRect.right - 64f, titleRect.centerY(), 14f, emeraldAccent, Color.WHITE);
-
-        StaticLayout titleLayout = layout.getTitleLayout();
+        StaticLayout titleLayout = plan.titleLayout;
         canvas.save();
-        float titleTextLeft = titleRect.centerX() - titleLayout.getWidth() / 2f;
-        float titleTextTop = titleRect.centerY() - titleLayout.getHeight() / 2f;
+        float titleTextLeft = plan.titleRect.centerX() - titleLayout.getWidth() / 2f;
+        float titleTextTop = plan.titleRect.centerY() - titleLayout.getHeight() / 2f;
         canvas.translate(titleTextLeft, titleTextTop);
         titleLayout.draw(canvas);
         canvas.restore();
 
-        // 4. Surveyed Land Parcel Panorama Showcase + Adaptive Multi-Field Cards
-        drawLandShowcaseStrip(canvas, layout.getShowcaseRect(), forestGreen, emeraldAccent, softMint, cardBorder);
-        drawLandFieldCards(canvas, layout, forestGreen, emeraldAccent, softMint, cardBorder);
+        // 4. Main Central Green-Bordered Panel
+        fillPaint.setColor(Color.WHITE);
+        canvas.drawRoundRect(
+                plan.panelRect,
+                theme.getDetailsCornerRadius(),
+                theme.getDetailsCornerRadius(),
+                fillPaint
+        );
+        borderPaint.setColor(green);
+        borderPaint.setStrokeWidth(5f);
+        canvas.drawRoundRect(
+                plan.panelRect,
+                theme.getDetailsCornerRadius(),
+                theme.getDetailsCornerRadius(),
+                borderPaint
+        );
 
-        // 5. Bottom Emerald-Trimmed Forest Green Contact Card + Shield Badge
-        RectF contactRect = layout.getContactRect();
-        fillPaint.setColor(forestGreen);
+        drawLandPastureScene(canvas, plan.illustRect, green);
+
+        if (plan.hasMainFields) {
+            Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            dividerPaint.setColor(green);
+            dividerPaint.setStrokeWidth(4.5f);
+            dividerPaint.setStrokeCap(Paint.Cap.ROUND);
+            canvas.drawLine(
+                    plan.dividerX,
+                    plan.panelRect.top + 20f,
+                    plan.dividerX,
+                    plan.panelRect.bottom - 20f,
+                    dividerPaint
+            );
+
+            for (DynamicPosterLayoutEngine.TextBlockPlacement block : plan.mainBlocks) {
+                canvas.save();
+                canvas.translate(block.x, block.y);
+                block.layout.draw(canvas);
+                canvas.restore();
+            }
+        }
+
+        // 5. Optional Separate Rounded Green-Bordered Dag & Khatian Row
+        if (plan.hasDagKhatianRow) {
+            RectF dkRect = plan.dagKhatianRect;
+            fillPaint.setColor(Color.WHITE);
+            canvas.drawRoundRect(dkRect, 28f, 28f, fillPaint);
+
+            borderPaint.setColor(green);
+            borderPaint.setStrokeWidth(4.5f);
+            canvas.drawRoundRect(dkRect, 28f, 28f, borderPaint);
+
+            if (plan.hasDag && plan.hasKhatian) {
+                Paint midDiv = new Paint(Paint.ANTI_ALIAS_FLAG);
+                midDiv.setColor(green);
+                midDiv.setStrokeWidth(4f);
+                canvas.drawLine(
+                        plan.width / 2f,
+                        dkRect.top + 14f,
+                        plan.width / 2f,
+                        dkRect.bottom - 14f,
+                        midDiv
+                );
+
+                if (plan.dagLayout != null) {
+                    canvas.save();
+                    float leftSlotCenter = (dkRect.left + 16f + plan.width / 2f - 8f) / 2f;
+                    canvas.translate(
+                            leftSlotCenter - plan.dagLayout.getWidth() / 2f,
+                            dkRect.centerY() - plan.dagLayout.getHeight() / 2f
+                    );
+                    plan.dagLayout.draw(canvas);
+                    canvas.restore();
+                }
+
+                if (plan.khatianLayout != null) {
+                    canvas.save();
+                    float rightSlotCenter = (plan.width / 2f + 8f + dkRect.right - 16f) / 2f;
+                    canvas.translate(
+                            rightSlotCenter - plan.khatianLayout.getWidth() / 2f,
+                            dkRect.centerY() - plan.khatianLayout.getHeight() / 2f
+                    );
+                    plan.khatianLayout.draw(canvas);
+                    canvas.restore();
+                }
+            } else {
+                StaticLayout singleLayout = plan.hasDag ? plan.dagLayout : plan.khatianLayout;
+                if (singleLayout != null) {
+                    canvas.save();
+                    canvas.translate(
+                            dkRect.centerX() - singleLayout.getWidth() / 2f,
+                            dkRect.centerY() - singleLayout.getHeight() / 2f
+                    );
+                    singleLayout.draw(canvas);
+                    canvas.restore();
+                }
+            }
+        }
+
+        // 6. Optional Additional Info Text Below Dag/Khatian Row (Directly on White Canvas)
+        if (plan.hasAdditional && plan.additionalLayout != null) {
+            canvas.save();
+            float tx = plan.additionalLayout.getLineCount() <= 2
+                    ? (plan.width / 2f - plan.additionalLayout.getWidth() / 2f)
+                    : plan.additionalLeftX;
+            canvas.translate(tx, plan.additionalTopY);
+            plan.additionalLayout.draw(canvas);
+            canvas.restore();
+        }
+
+        // 7. Bottom Dark Green Contact Banner
+        RectF contactRect = plan.contactRect;
+        fillPaint.setColor(green);
         canvas.drawRoundRect(
                 contactRect,
                 theme.getContactCornerRadius(),
@@ -117,63 +222,41 @@ public final class LandPosterTemplate {
                 fillPaint
         );
 
-        fillPaint.setColor(emeraldAccent);
-        canvas.drawRoundRect(
-                new RectF(contactRect.left + 250f, contactRect.top + 8f, contactRect.right - 60f, contactRect.top + 13f),
-                2.5f, 2.5f, fillPaint
-        );
-
-        float badgeSize = Math.min(108f, contactRect.height() * 0.68f);
-        float badgeCx = contactRect.left + 106f;
-        float badgeCy = contactRect.centerY();
-        RectF badgeRect = new RectF(
-                badgeCx - badgeSize / 2f,
-                badgeCy - badgeSize / 2f,
-                badgeCx + badgeSize / 2f,
-                badgeCy + badgeSize / 2f
-        );
+        float phoneR = 52f;
+        float phoneCx = contactRect.left + 104f;
+        float phoneCy = contactRect.centerY();
         fillPaint.setColor(Color.WHITE);
-        canvas.drawRoundRect(badgeRect, 24f, 24f, fillPaint);
+        canvas.drawCircle(phoneCx, phoneCy, phoneR, fillPaint);
 
-        Paint badgeStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        badgeStroke.setColor(Color.parseColor("#86EFAC"));
-        badgeStroke.setStyle(Paint.Style.STROKE);
-        badgeStroke.setStrokeWidth(3f);
-        canvas.drawRoundRect(
-                new RectF(badgeRect.left + 5f, badgeRect.top + 5f, badgeRect.right - 5f, badgeRect.bottom - 5f),
-                19f, 19f, badgeStroke
-        );
+        drawGreenHandsetIcon(canvas, phoneCx, phoneCy, phoneR, green);
 
-        drawGreenHandsetIcon(canvas, badgeCx, badgeCy, badgeSize * 0.50f, forestGreen);
-
-        Paint dividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dividerPaint.setColor(Color.parseColor("#A7F3D0"));
-        dividerPaint.setStrokeWidth(4.5f);
-        dividerPaint.setStrokeCap(Paint.Cap.ROUND);
-        float contactDividerX = contactRect.left + 196f;
-        float contactDividerInset = contactRect.height() * 0.22f;
+        Paint contactDividerPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        contactDividerPaint.setColor(Color.WHITE);
+        contactDividerPaint.setStrokeWidth(4.5f);
+        contactDividerPaint.setStrokeCap(Paint.Cap.ROUND);
+        float contactDividerX = contactRect.left + 194f;
         canvas.drawLine(
                 contactDividerX,
-                contactRect.top + contactDividerInset,
+                contactRect.top + 26f,
                 contactDividerX,
-                contactRect.bottom - contactDividerInset,
-                dividerPaint
+                contactRect.bottom - 26f,
+                contactDividerPaint
         );
 
-        String contactLine = theme.getContactPrefix() + record.getMobile();
-        float mobileAreaLeft = contactDividerX + 26f;
-        float mobileAreaRight = contactRect.right - 34f;
+        String contactLine = theme.getContactPrefix() + record.getMobile().trim();
+        float mobileAreaLeft = contactDividerX + 28f;
+        float mobileAreaRight = contactRect.right - 36f;
         float mobileAreaWidth = mobileAreaRight - mobileAreaLeft;
 
         TextPaint mobilePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
         mobilePaint.setColor(Color.WHITE);
-        mobilePaint.setTypeface(Typeface.create(paragraphTypeface, Typeface.BOLD));
+        mobilePaint.setTypeface(Typeface.create(titleTypeface, Typeface.BOLD));
         mobilePaint.setFakeBoldText(true);
         mobilePaint.setTextAlign(Paint.Align.CENTER);
         float fittedContactSize = PosterTextFitter.fitSingleLineTextSize(
                 contactLine,
                 mobilePaint,
-                mobileAreaWidth - 16f,
+                mobileAreaWidth - 12f,
                 theme.getFixedContactFontSizePx(),
                 PosterThemeConfig.MIN_CONTACT_FONT_SIZE_PX
         );
@@ -187,404 +270,316 @@ public final class LandPosterTemplate {
                 mobilePaint
         );
 
-        return layout.isOverflowed();
-    }
-
-    private static void drawLandShowcaseStrip(
-            @NonNull Canvas canvas,
-            @NonNull RectF showcaseRect,
-            int forestGreen,
-            int emeraldAccent,
-            int softMint,
-            int cardBorder
-    ) {
-        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        fill.setStyle(Paint.Style.FILL);
-        fill.setColor(softMint);
-        canvas.drawRoundRect(showcaseRect, 24f, 24f, fill);
-
-        Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setColor(forestGreen);
-        stroke.setStrokeWidth(4f);
-        canvas.drawRoundRect(showcaseRect, 24f, 24f, stroke);
-
-        drawRightCornerBrackets(canvas, showcaseRect, emeraldAccent);
-
-        // Decorative dashed surveyor contour lines flanking centered Land Parcel Plot graphic
-        Paint dash = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dash.setColor(emeraldAccent);
-        dash.setAlpha(110);
-        dash.setStyle(Paint.Style.STROKE);
-        dash.setStrokeWidth(3f);
-        dash.setPathEffect(new DashPathEffect(new float[]{12f, 10f}, 0f));
-
-        float midY = showcaseRect.centerY();
-        canvas.drawLine(showcaseRect.left + 44f, midY - 14f, showcaseRect.centerX() - 185f, midY - 14f, dash);
-        canvas.drawLine(showcaseRect.centerX() + 185f, midY - 14f, showcaseRect.right - 44f, midY - 14f, dash);
-        canvas.drawLine(showcaseRect.left + 76f, midY + 18f, showcaseRect.centerX() - 185f, midY + 18f, dash);
-        canvas.drawLine(showcaseRect.centerX() + 185f, midY + 18f, showcaseRect.right - 76f, midY + 18f, dash);
-
-        drawLandParcelIllustration(canvas, showcaseRect, forestGreen, emeraldAccent);
-    }
-
-    private static void drawLandFieldCards(
-            @NonNull Canvas canvas,
-            @NonNull DynamicPosterLayoutEngine.PortraitLayoutPlan layout,
-            int forestGreen,
-            int emeraldAccent,
-            int softMint,
-            int cardBorder
-    ) {
-        Paint cardFill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        cardFill.setStyle(Paint.Style.FILL);
-        cardFill.setColor(Color.WHITE);
-
-        Paint softHeaderTint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        softHeaderTint.setStyle(Paint.Style.FILL);
-        softHeaderTint.setColor(softMint);
-
-        Paint cardStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        cardStroke.setStyle(Paint.Style.STROKE);
-        cardStroke.setColor(forestGreen);
-        cardStroke.setAlpha(185);
-        cardStroke.setStrokeWidth(3.5f);
-
-        Paint emeraldStripe = new Paint(Paint.ANTI_ALIAS_FLAG);
-        emeraldStripe.setStyle(Paint.Style.FILL);
-        emeraldStripe.setColor(emeraldAccent);
-
-        for (DynamicPosterLayoutEngine.FieldCardPlacement card : layout.getFieldCards()) {
-            RectF r = card.getCardRect();
-            canvas.drawRoundRect(r, 20f, 20f, cardFill);
-
-            // Soft mint tint behind label header band inside each Land field card
-            RectF labelRect = card.getLabelRect();
-            RectF valueRect = card.getValueRect();
-            float headerBandBottom = Math.min(r.bottom - 8f, labelRect.bottom + 8f);
-            canvas.save();
-            Path clip = new Path();
-            clip.addRoundRect(r, 20f, 20f, Path.Direction.CW);
-            canvas.clipPath(clip);
-            canvas.drawRect(r.left, r.top, r.right, headerBandBottom, softHeaderTint);
-            canvas.restore();
-
-            canvas.drawRoundRect(r, 20f, 20f, cardStroke);
-
-            // Left emerald vertical accent notch
-            canvas.drawRoundRect(
-                    new RectF(r.left + 2f, r.top + 14f, r.left + 10f, r.bottom - 14f),
-                    4f, 4f, emeraldStripe
-            );
-
-            // Small diamond survey marker beside field label
-            drawDiamondMarker(canvas, labelRect.left + 10f, labelRect.centerY(), 8.5f, forestGreen, Color.WHITE);
-
-            canvas.save();
-            canvas.translate(labelRect.left + 28f, labelRect.top);
-            card.getLabelLayout().draw(canvas);
-            canvas.restore();
-
-            // Rich text value (paragraph.ttf + Bold/Italic)
-            canvas.save();
-            canvas.clipRect(valueRect.left - 4f, valueRect.top - 4f, valueRect.right + 4f, r.bottom - 6f);
-            canvas.translate(valueRect.left, valueRect.top);
-            card.getValueLayout().draw(canvas);
-            canvas.restore();
-        }
-    }
-
-    private static void drawLandSurveyOuterBorder(
-            @NonNull Canvas canvas,
-            @NonNull RectF outerRect,
-            float radius,
-            int forestGreen,
-            int emeraldAccent
-    ) {
-        Paint outerStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        outerStroke.setColor(forestGreen);
-        outerStroke.setStyle(Paint.Style.STROKE);
-        outerStroke.setStrokeWidth(6.5f);
-        canvas.drawRoundRect(outerRect, radius, radius, outerStroke);
-
-        Paint innerStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        innerStroke.setColor(emeraldAccent);
-        innerStroke.setStyle(Paint.Style.STROKE);
-        innerStroke.setStrokeWidth(2f);
-        RectF inner = new RectF(
-                outerRect.left + 10f,
-                outerRect.top + 10f,
-                outerRect.right - 10f,
-                outerRect.bottom - 10f
-        );
-        canvas.drawRoundRect(inner, Math.max(8f, radius - 6f), Math.max(8f, radius - 6f), innerStroke);
-    }
-
-    private static void drawRightCornerBrackets(
-            @NonNull Canvas canvas,
-            @NonNull RectF card,
-            int accentColor
-    ) {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setColor(accentColor);
-        p.setStyle(Paint.Style.STROKE);
-        p.setStrokeWidth(4f);
-        p.setStrokeCap(Paint.Cap.ROUND);
-        float inset = 16f;
-        float arm = 20f;
-
-        canvas.drawLine(card.right - inset - arm, card.top + inset, card.right - inset, card.top + inset, p);
-        canvas.drawLine(card.right - inset, card.top + inset, card.right - inset, card.top + inset + arm, p);
-
-        canvas.drawLine(card.right - inset - arm, card.bottom - inset, card.right - inset, card.bottom - inset, p);
-        canvas.drawLine(card.right - inset, card.bottom - inset, card.right - inset, card.bottom - inset - arm, p);
+        return false;
     }
 
     private static void drawTopLandHeaderEmblem(
             @NonNull Canvas canvas,
-            @NonNull RectF headerRect,
-            int forestGreen,
-            int emeraldAccent
+            int width,
+            float topY,
+            int green
     ) {
-        float cx = headerRect.centerX();
-        float bottomY = headerRect.bottom - 8f;
-
-        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
-        fill.setStyle(Paint.Style.FILL);
-
-        Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeCap(Paint.Cap.ROUND);
-
-        float barY = bottomY - 34f;
-        float innerGap = 158f;
-        float barOuter = 540f;
-
-        stroke.setColor(forestGreen);
-        stroke.setStrokeWidth(6f);
-        canvas.drawLine(cx - barOuter, barY, cx - innerGap, barY, stroke);
-        canvas.drawLine(cx + innerGap, barY, cx + barOuter, barY, stroke);
-
-        stroke.setColor(emeraldAccent);
-        stroke.setStrokeWidth(3f);
-        canvas.drawLine(cx - barOuter + 44f, barY + 12f, cx - innerGap - 18f, barY + 12f, stroke);
-        canvas.drawLine(cx + innerGap + 18f, barY + 12f, cx + barOuter - 44f, barY + 12f, stroke);
-
-        drawDiamondMarker(canvas, cx - innerGap, barY, 10f, forestGreen, Color.WHITE);
-        drawDiamondMarker(canvas, cx + innerGap, barY, 10f, forestGreen, Color.WHITE);
-        drawDiamondMarker(canvas, cx - barOuter, barY, 7f, emeraldAccent, Color.WHITE);
-        drawDiamondMarker(canvas, cx + barOuter, barY, 7f, emeraldAccent, Color.WHITE);
-
-        stroke.setColor(forestGreen);
-        stroke.setStrokeWidth(5f);
-        Path contourOuter = new Path();
-        contourOuter.moveTo(cx - 122f, bottomY);
-        contourOuter.quadTo(cx, bottomY - 34f, cx + 122f, bottomY);
-        canvas.drawPath(contourOuter, stroke);
-
-        stroke.setColor(emeraldAccent);
-        stroke.setStrokeWidth(3.5f);
-        Path contourInner = new Path();
-        contourInner.moveTo(cx - 82f, bottomY + 4f);
-        contourInner.quadTo(cx, bottomY - 16f, cx + 82f, bottomY + 4f);
-        canvas.drawPath(contourInner, stroke);
-
-        float pinCx = cx;
-        float pinCircleY = headerRect.top + 48f;
-        float pinRadius = 31f;
-        float pinTipY = bottomY - 14f;
-
-        Path pinBody = new Path();
-        pinBody.addCircle(pinCx, pinCircleY, pinRadius, Path.Direction.CW);
-        pinBody.moveTo(pinCx - pinRadius * 0.86f, pinCircleY + pinRadius * 0.45f);
-        pinBody.lineTo(pinCx, pinTipY);
-        pinBody.lineTo(pinCx + pinRadius * 0.86f, pinCircleY + pinRadius * 0.45f);
-        pinBody.close();
-
-        fill.setColor(forestGreen);
-        canvas.drawPath(pinBody, fill);
-
-        fill.setColor(Color.WHITE);
-        canvas.drawCircle(pinCx, pinCircleY, 14f, fill);
-
-        fill.setColor(emeraldAccent);
-        canvas.drawCircle(pinCx, pinCircleY, 7.5f, fill);
-    }
-
-    private static void drawLandParcelIllustration(
-            @NonNull Canvas canvas,
-            @NonNull RectF showcaseRect,
-            int forestGreen,
-            int emeraldAccent
-    ) {
-        float scale = Math.min(
-                0.76f,
-                Math.min((showcaseRect.width() - 40f) / 310f, (showcaseRect.height() - 22f) / 260f)
-        );
-
+        float cx = width / 2f;
         canvas.save();
-        canvas.translate(showcaseRect.centerX(), showcaseRect.centerY() + 10f);
-        canvas.scale(scale, scale);
+        canvas.translate(0f, topY);
 
         Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
         fill.setStyle(Paint.Style.FILL);
+        fill.setColor(green);
 
-        Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
-        stroke.setStyle(Paint.Style.STROKE);
-        stroke.setStrokeCap(Paint.Cap.ROUND);
-        stroke.setStrokeJoin(Paint.Join.ROUND);
+        Path leftBar = new Path();
+        leftBar.moveTo(80f, 74f);
+        leftBar.lineTo(448f, 66f);
+        leftBar.arcTo(new RectF(440f, 66f, 456f, 82f), -90f, 180f, false);
+        leftBar.lineTo(80f, 74f);
+        leftBar.close();
+        canvas.drawPath(leftBar, fill);
 
-        fill.setColor(forestGreen);
-        Path baseArc = new Path();
-        baseArc.moveTo(-136f, 114f);
-        baseArc.quadTo(0f, 88f, 136f, 114f);
-        baseArc.quadTo(0f, 102f, -136f, 114f);
-        baseArc.close();
-        canvas.drawPath(baseArc, fill);
+        Path rightBar = new Path();
+        rightBar.moveTo(width - 80f, 74f);
+        rightBar.lineTo(width - 448f, 66f);
+        rightBar.arcTo(new RectF(width - 456f, 66f, width - 440f, 82f), -90f, -180f, false);
+        rightBar.lineTo(width - 80f, 74f);
+        rightBar.close();
+        canvas.drawPath(rightBar, fill);
 
-        Path plotSurface = new Path();
-        plotSurface.moveTo(-84f, 12f);
-        plotSurface.lineTo(84f, 12f);
-        plotSurface.lineTo(126f, 94f);
-        plotSurface.lineTo(-126f, 94f);
-        plotSurface.close();
+        Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        arcPaint.setColor(green);
+        arcPaint.setStyle(Paint.Style.STROKE);
+        arcPaint.setStrokeCap(Paint.Cap.ROUND);
 
-        fill.setColor(Color.WHITE);
-        canvas.drawPath(plotSurface, fill);
+        float baseLineY = 124f;
+        float[][] arcs = {
+                {280f, 52f, 4.5f},
+                {215f, 42f, 5f},
+                {155f, 32f, 5.5f},
+                {96f, 20f, 5f}
+        };
+        for (float[] a : arcs) {
+            arcPaint.setStrokeWidth(a[2]);
+            Path p = new Path();
+            p.moveTo(cx - a[0], baseLineY);
+            p.quadTo(cx, baseLineY - a[1] * 2f, cx + a[0], baseLineY);
+            canvas.drawPath(p, arcPaint);
+        }
 
-        fill.setColor(Color.argb(38, 22, 163, 74));
-        canvas.drawPath(plotSurface, fill);
+        drawMiniHeaderTree(canvas, cx - 182f, baseLineY - 8f, 1.0f, green);
+        drawMiniHeaderTree(canvas, cx + 182f, baseLineY - 12f, 0.92f, green);
 
-        Paint dashPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        dashPaint.setColor(emeraldAccent);
-        dashPaint.setStyle(Paint.Style.STROKE);
-        dashPaint.setStrokeWidth(3f);
-        dashPaint.setPathEffect(new DashPathEffect(new float[]{9f, 7f}, 0f));
-        canvas.drawLine(0f, 12f, 0f, 94f, dashPaint);
-        canvas.drawLine(-106f, 52f, 106f, 52f, dashPaint);
+        float pinCy = 36f;
+        float pinR = 32f;
 
-        stroke.setColor(forestGreen);
-        stroke.setStrokeWidth(5.5f);
-        canvas.drawPath(plotSurface, stroke);
+        Paint whitePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        whitePaint.setColor(Color.WHITE);
+        whitePaint.setStyle(Paint.Style.FILL);
+        Path halo = new Path();
+        float hr = pinR + 4f;
+        halo.addCircle(cx, pinCy, hr, Path.Direction.CW);
+        halo.moveTo(cx - hr * 0.85f, pinCy + hr * 0.45f);
+        halo.lineTo(cx, baseLineY - 2f);
+        halo.lineTo(cx + hr * 0.85f, pinCy + hr * 0.45f);
+        halo.close();
+        canvas.drawPath(halo, whitePaint);
 
-        drawMiniLandTree(canvas, -104f, 14f, 0.90f, forestGreen, emeraldAccent);
-        drawMiniLandTree(canvas, 104f, 14f, 0.85f, forestGreen, emeraldAccent);
-
-        drawBoundaryStake(canvas, -84f, 12f, forestGreen, emeraldAccent);
-        drawBoundaryStake(canvas, 84f, 12f, forestGreen, emeraldAccent);
-        drawBoundaryStake(canvas, -126f, 94f, forestGreen, emeraldAccent);
-        drawBoundaryStake(canvas, 126f, 94f, forestGreen, emeraldAccent);
-
-        stroke.setColor(emeraldAccent);
-        stroke.setStrokeWidth(3f);
-        canvas.drawOval(new RectF(-36f, 24f, 36f, 50f), stroke);
-
-        float pinCx = 0f;
-        float pinCy = -64f;
-        float pinR = 34f;
         Path pin = new Path();
-        pin.addCircle(pinCx, pinCy, pinR, Path.Direction.CW);
-        pin.moveTo(pinCx - pinR * 0.85f, pinCy + pinR * 0.45f);
-        pin.lineTo(pinCx, 30f);
-        pin.lineTo(pinCx + pinR * 0.85f, pinCy + pinR * 0.45f);
+        pin.addCircle(cx, pinCy, pinR, Path.Direction.CW);
+        pin.moveTo(cx - pinR * 0.85f, pinCy + pinR * 0.44f);
+        pin.lineTo(cx, baseLineY - 6f);
+        pin.lineTo(cx + pinR * 0.85f, pinCy + pinR * 0.44f);
         pin.close();
-
-        fill.setColor(forestGreen);
         canvas.drawPath(pin, fill);
 
-        fill.setColor(Color.WHITE);
-        canvas.drawCircle(pinCx, pinCy, 16f, fill);
-
-        fill.setColor(emeraldAccent);
-        canvas.drawCircle(pinCx, pinCy, 8.5f, fill);
+        canvas.drawCircle(cx, pinCy, 15f, whitePaint);
+        canvas.drawCircle(cx, pinCy, 7.5f, fill);
 
         canvas.restore();
     }
 
-    private static void drawMiniLandTree(
+    private static void drawMiniHeaderTree(
             @NonNull Canvas canvas,
-            float baseX,
-            float baseY,
+            float tx,
+            float ty,
             float scale,
-            int forestGreen,
-            int emeraldAccent
+            int green
     ) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setColor(green);
+        p.setStyle(Paint.Style.FILL);
+
+        canvas.save();
+        canvas.translate(tx, ty);
+        canvas.scale(scale, scale);
+        canvas.drawRect(-4f, -34f, 4f, 0f, p);
+        canvas.drawCircle(0f, -56f, 20f, p);
+        canvas.drawCircle(-14f, -44f, 14f, p);
+        canvas.drawCircle(14f, -44f, 14f, p);
+        canvas.drawCircle(-6f, -68f, 13f, p);
+        canvas.drawCircle(8f, -66f, 12f, p);
+        canvas.restore();
+    }
+
+    private static void drawLandPastureScene(
+            @NonNull Canvas canvas,
+            @NonNull RectF box,
+            int darkGreen
+    ) {
+        float left = box.left;
+        float top = box.top;
+        float width = box.width();
+        float height = box.height();
+        float horizonY = top + height * 0.37f;
+
+        canvas.save();
+        Path clip = new Path();
+        clip.addRoundRect(box, 10f, 10f, Path.Direction.CW);
+        canvas.clipPath(clip);
+
+        Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        fill.setStyle(Paint.Style.FILL);
+
+        // Sky gradient
+        fill.setShader(new LinearGradient(
+                0f, top, 0f, horizonY,
+                Color.parseColor("#D7E8F7"),
+                Color.parseColor("#F5F9FD"),
+                Shader.TileMode.CLAMP
+        ));
+        canvas.drawRect(left, top, box.right, horizonY + 6f, fill);
+        fill.setShader(null);
+
+        // Clouds
+        fill.setColor(Color.argb(210, 255, 255, 255));
+        float[][] clouds = {
+                {0.14f, 0.22f, 28f},
+                {0.20f, 0.25f, 22f},
+                {0.48f, 0.16f, 30f},
+                {0.56f, 0.20f, 24f},
+                {0.72f, 0.18f, 26f},
+                {0.86f, 0.23f, 24f}
+        };
+        for (float[] c : clouds) {
+            canvas.drawCircle(left + width * c[0], top + height * c[1], c[2], fill);
+        }
+
+        // Distant treeline silhouette
+        fill.setColor(Color.parseColor("#2F8F3B"));
+        Path treeline = new Path();
+        treeline.moveTo(left, horizonY + 4f);
+        for (int i = 0; i <= 14; i++) {
+            float px = left + (width * i) / 14f;
+            float py = horizonY - 12f - (i % 3) * 8f - (i % 2) * 5f;
+            treeline.lineTo(px, py);
+        }
+        treeline.lineTo(box.right, horizonY + 4f);
+        treeline.close();
+        canvas.drawPath(treeline, fill);
+
+        drawSceneryTree(canvas, left + width * 0.28f, horizonY + 2f, 1.02f);
+        drawSceneryTree(canvas, left + width * 0.08f, horizonY + 3f, 0.58f);
+        drawSceneryTree(canvas, left + width * 0.72f, horizonY + 1f, 0.42f);
+        drawSceneryTree(canvas, left + width * 0.91f, horizonY + 2f, 0.74f);
+
+        fill.setColor(Color.parseColor("#187526"));
+        for (int i = 0; i < 16; i++) {
+            float bx = left + (width * (i + 0.5f)) / 16f;
+            canvas.drawCircle(bx, horizonY + 2f, 12f + (i % 3) * 4f, fill);
+        }
+
+        // Perspective grass meadow
+        fill.setShader(new LinearGradient(
+                0f, horizonY, 0f, box.bottom,
+                Color.parseColor("#5CD43C"),
+                Color.parseColor("#2B9D1E"),
+                Shader.TileMode.CLAMP
+        ));
+        canvas.drawRect(left, horizonY, box.right, box.bottom, fill);
+        fill.setShader(null);
+
+        float fieldH = box.bottom - horizonY;
+        float[] stripeFracs = {0.06f, 0.14f, 0.24f, 0.36f, 0.50f, 0.67f, 0.86f};
+        for (int i = 0; i < stripeFracs.length; i++) {
+            float y1 = horizonY + fieldH * stripeFracs[i];
+            float next = i + 1 < stripeFracs.length ? stripeFracs[i + 1] : 1.0f;
+            float y2 = horizonY + fieldH * next;
+            fill.setColor(i % 2 == 0 ? Color.argb(96, 130, 235, 84) : Color.argb(50, 20, 128, 22));
+            canvas.drawRect(left, y1, box.right, y2, fill);
+        }
+
+        Paint furrowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        furrowPaint.setColor(Color.argb(56, 25, 130, 22));
+        furrowPaint.setStrokeWidth(2f);
+        float vanishX = left + width * 0.5f;
+        for (int k = -4; k <= 4; k++) {
+            canvas.drawLine(vanishX + k * 14f, horizonY, vanishX + k * 56f, box.bottom, furrowPaint);
+        }
+
+        // White wooden perspective fences
+        drawPerspectiveFence(canvas, box, horizonY, true);
+        drawPerspectiveFence(canvas, box, horizonY, false);
+
+        Paint outline = new Paint(Paint.ANTI_ALIAS_FLAG);
+        outline.setColor(darkGreen);
+        outline.setStyle(Paint.Style.STROKE);
+        outline.setStrokeWidth(2f);
+        canvas.drawRoundRect(
+                new RectF(left + 1f, top + 1f, box.right - 1f, box.bottom - 1f),
+                9f, 9f, outline
+        );
+
+        canvas.restore();
+    }
+
+    private static void drawSceneryTree(@NonNull Canvas canvas, float tx, float baseY, float scale) {
         Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
         p.setStyle(Paint.Style.FILL);
         canvas.save();
-        canvas.translate(baseX, baseY);
+        canvas.translate(tx, baseY);
         canvas.scale(scale, scale);
 
-        p.setColor(forestGreen);
-        canvas.drawRect(-4.5f, -40f, 4.5f, 0f, p);
-        canvas.drawCircle(0f, -64f, 22f, p);
-        p.setColor(emeraldAccent);
-        canvas.drawCircle(-11f, -50f, 14f, p);
-        canvas.drawCircle(11f, -50f, 14f, p);
+        p.setColor(Color.parseColor("#27591E"));
+        canvas.drawRect(-6f, -34f, 6f, 2f, p);
+
+        p.setColor(Color.parseColor("#0D5E1D"));
+        canvas.drawCircle(0f, -64f, 34f, p);
+        canvas.drawCircle(-26f, -48f, 24f, p);
+        canvas.drawCircle(26f, -48f, 24f, p);
+
+        p.setColor(Color.parseColor("#229932"));
+        canvas.drawCircle(-8f, -72f, 24f, p);
+        canvas.drawCircle(16f, -64f, 20f, p);
+        canvas.drawCircle(-22f, -52f, 17f, p);
+        canvas.drawCircle(20f, -48f, 16f, p);
+
+        p.setColor(Color.parseColor("#5FD148"));
+        canvas.drawCircle(-10f, -78f, 13f, p);
+        canvas.drawCircle(10f, -70f, 10f, p);
 
         canvas.restore();
     }
 
-    private static void drawBoundaryStake(
+    private static void drawPerspectiveFence(
             @NonNull Canvas canvas,
-            float x,
-            float y,
-            int forestGreen,
-            int emeraldAccent
+            @NonNull RectF box,
+            float horizonY,
+            boolean isLeft
     ) {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setStyle(Paint.Style.FILL);
-        p.setColor(forestGreen);
-        canvas.drawCircle(x, y, 8.5f, p);
-        p.setColor(Color.WHITE);
-        canvas.drawCircle(x, y, 4.5f, p);
-        p.setColor(emeraldAccent);
-        canvas.drawCircle(x, y, 2.2f, p);
-    }
+        float startX = isLeft ? box.left - 8f : box.right + 8f;
+        float endX = isLeft ? (box.left + box.width() * 0.42f) : (box.left + box.width() * 0.58f);
+        float startBottomY = box.top + box.height() * 0.86f;
+        float endBottomY = horizonY + 6f;
+        float startH = box.height() * 0.32f;
+        float endH = box.height() * 0.06f;
 
-    private static void drawDiamondMarker(
-            @NonNull Canvas canvas,
-            float cx,
-            float cy,
-            float radius,
-            int outerColor,
-            int innerColor
-    ) {
-        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
-        p.setStyle(Paint.Style.FILL);
+        Paint shadowPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        shadowPaint.setColor(Color.argb(72, 8, 70, 18));
+        shadowPaint.setStrokeWidth(6f);
+        canvas.drawLine(startX, startBottomY + 2f, endX, endBottomY + 1f, shadowPaint);
 
-        Path outer = new Path();
-        outer.moveTo(cx, cy - radius);
-        outer.lineTo(cx + radius, cy);
-        outer.lineTo(cx, cy + radius);
-        outer.lineTo(cx - radius, cy);
-        outer.close();
-        p.setColor(outerColor);
-        canvas.drawPath(outer, p);
+        Paint railPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        railPaint.setColor(Color.WHITE);
+        railPaint.setStrokeWidth(5f);
 
-        float innerR = radius * 0.45f;
-        Path inner = new Path();
-        inner.moveTo(cx, cy - innerR);
-        inner.lineTo(cx + innerR, cy);
-        inner.lineTo(cx, cy + innerR);
-        inner.lineTo(cx - innerR, cy);
-        inner.close();
-        p.setColor(innerColor);
-        canvas.drawPath(inner, p);
+        Paint railEdge = new Paint(Paint.ANTI_ALIAS_FLAG);
+        railEdge.setColor(Color.argb(64, 16, 95, 32));
+        railEdge.setStrokeWidth(1.5f);
+
+        for (float hRatio : new float[]{0.38f, 0.78f}) {
+            canvas.drawLine(startX, startBottomY - startH * hRatio, endX, endBottomY - endH * hRatio, railPaint);
+            canvas.drawLine(startX, startBottomY - startH * hRatio + 3f, endX, endBottomY - endH * hRatio + 1.5f, railEdge);
+        }
+
+        Paint postFill = new Paint(Paint.ANTI_ALIAS_FLAG);
+        postFill.setColor(Color.WHITE);
+        postFill.setStyle(Paint.Style.FILL);
+
+        Paint postStroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+        postStroke.setColor(Color.argb(72, 16, 95, 32));
+        postStroke.setStyle(Paint.Style.STROKE);
+        postStroke.setStrokeWidth(1f);
+
+        for (float t : new float[]{0.95f, 0.84f, 0.70f, 0.53f, 0.34f, 0.14f}) {
+            float px = startX + (endX - startX) * t;
+            float pyBottom = startBottomY + (endBottomY - startBottomY) * t;
+            float postH = startH + (endH - startH) * t;
+            float postW = Math.max(3f, 10f * (1f - t * 0.7f));
+            RectF postRect = new RectF(px - postW / 2f, pyBottom - postH, px + postW / 2f, pyBottom);
+            canvas.drawRect(postRect, postFill);
+            canvas.drawRect(postRect, postStroke);
+        }
     }
 
     private static void drawGreenHandsetIcon(
             @NonNull Canvas canvas,
             float cx,
             float cy,
-            float iconRadius,
-            int forestGreen
+            float circleRadius,
+            int green
     ) {
         Paint phonePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        phonePaint.setColor(forestGreen);
+        phonePaint.setColor(green);
         phonePaint.setStyle(Paint.Style.FILL);
 
-        float s = iconRadius / 56f;
+        float s = circleRadius / 62f;
         canvas.save();
         canvas.translate(cx, cy);
         canvas.scale(s, s);

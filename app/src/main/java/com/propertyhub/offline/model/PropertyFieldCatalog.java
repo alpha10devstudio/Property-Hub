@@ -42,7 +42,7 @@ public final class PropertyFieldCatalog {
                     "",
                     "রুম সংখ্যা, সুবিধা, ভাড়া ইত্যাদি লিখুন",
                     PropertyFieldInputType.MULTILINE,
-                    true,
+                    false,
                     true,
                     2,
                     true

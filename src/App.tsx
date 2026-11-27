@@ -27,10 +27,11 @@ import {
   RefreshCw,
   Send,
   Settings,
+  Share2,
   Trash2,
   X,
 } from 'lucide-react';
-import { renderPortraitPosterDataUrl } from './posterEngine';
+import { ensurePosterFontsLoaded, renderDynamicPoster } from './posterEngine';
 import {
   appendRecord,
   buildDatedRecordId,
@@ -190,6 +191,10 @@ export default function App() {
   const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
+    void ensurePosterFontsLoaded();
+  }, []);
+
+  useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
@@ -223,6 +228,21 @@ export default function App() {
     () => Object.values(state.posters).sort((a, b) => b.createdAt - a.createdAt),
     [state.posters]
   );
+
+  const availableDates = useMemo(() => {
+    const set = new Set<string>();
+    if (activeLocalDate) set.add(activeLocalDate);
+    for (const p of postersList) {
+      if (p.date) set.add(p.date);
+    }
+    for (const fn of Object.keys(state.houseFiles)) {
+      set.add(fn.replace(/\.txt$/i, ''));
+    }
+    for (const fn of Object.keys(state.landFiles)) {
+      set.add(fn.replace(/\.txt$/i, ''));
+    }
+    return Array.from(set).sort().reverse();
+  }, [activeLocalDate, postersList, state.houseFiles, state.landFiles]);
 
   function handleSubmit(category: CategoryCode, e: React.FormEvent) {
     e.preventDefault();
@@ -286,11 +306,12 @@ export default function App() {
       setLandResetToken((n) => n + 1);
     }
 
-    window.setTimeout(() => {
+    window.setTimeout(async () => {
+      await ensurePosterFontsLoaded();
       let generatedPoster: PosterEntry | null = null;
       if (state.autoJpgOnSubmit) {
         const posterName = buildPosterFileName(category, recordId);
-        const dataUrl = renderPortraitPosterDataUrl(newRecord);
+        const rendered = renderDynamicPoster(newRecord);
         generatedPoster = {
           recordId,
           fileName: posterName,
@@ -298,7 +319,9 @@ export default function App() {
           date: dateStr,
           time: timeStr,
           sourceTxtFile: fileName,
-          dataUrl,
+          dataUrl: rendered.dataUrl,
+          width: rendered.width,
+          height: rendered.height,
           createdAt: Date.now(),
         };
       }
@@ -368,7 +391,7 @@ export default function App() {
     showTopToast(`Deleted ${recordId}`, 'Poster and TXT record removed cleanly', isHouse);
   }
 
-  function handleRegeneratePoster(poster: PosterEntry) {
+  async function handleRegeneratePoster(poster: PosterEntry) {
     const match = allRecords.find(
       (r) => r.category === poster.category && r.recordId === poster.recordId
     );
@@ -376,10 +399,13 @@ export default function App() {
       showTopToast('Source TXT Not Found', `No TXT record found for ${poster.recordId}`, false);
       return;
     }
-    const dataUrl = renderPortraitPosterDataUrl(match);
+    await ensurePosterFontsLoaded();
+    const rendered = renderDynamicPoster(match);
     const updated: PosterEntry = {
       ...poster,
-      dataUrl,
+      dataUrl: rendered.dataUrl,
+      width: rendered.width,
+      height: rendered.height,
       time: match.time,
       createdAt: Date.now(),
     };
@@ -388,6 +414,29 @@ export default function App() {
       posters: { ...prev.posters, [`${poster.category}|${poster.recordId}`]: updated },
     }));
     showTopToast('Poster Regenerated', poster.fileName, poster.category === 'HOUSE_FOR_RENT');
+  }
+
+  async function handleSharePoster(poster: PosterEntry) {
+    try {
+      const res = await fetch(poster.dataUrl);
+      const blob = await res.blob();
+      const file = new File([blob], poster.fileName, { type: 'image/jpeg' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: poster.fileName,
+          text: `${poster.recordId} Property Poster`,
+        });
+        return;
+      }
+    } catch {
+      // Fallback to direct download if navigator.share is cancelled or unavailable
+    }
+    const a = document.createElement('a');
+    a.href = poster.dataUrl;
+    a.download = poster.fileName;
+    a.click();
+    showTopToast('Poster Downloaded', `${poster.fileName} (${poster.width ?? 1440}×${poster.height ?? 1000})`, poster.category === 'HOUSE_FOR_RENT');
   }
 
   async function handleImportTxtFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
@@ -458,8 +507,9 @@ export default function App() {
     e.target.value = '';
   }
 
-  function handleGenerateMissingFromImport() {
+  async function handleGenerateMissingFromImport() {
     if (!importSummary) return;
+    await ensurePosterFontsLoaded();
     const candidates = [
       ...importSummary.pendingRecords,
       ...Object.values(conflictChoiceMap),
@@ -480,7 +530,7 @@ export default function App() {
         skipped += 1;
         continue;
       }
-      const dataUrl = renderPortraitPosterDataUrl(rec);
+      const rendered = renderDynamicPoster(rec);
       newPosters[posterKey] = {
         recordId: rec.recordId,
         fileName: buildPosterFileName(rec.category, rec.recordId),
@@ -488,7 +538,9 @@ export default function App() {
         date: rec.date,
         time: rec.time,
         sourceTxtFile: rec.sourceFileName,
-        dataUrl,
+        dataUrl: rendered.dataUrl,
+        width: rendered.width,
+        height: rendered.height,
         createdAt: Date.now() + succeeded,
       };
       succeeded += 1;
@@ -508,12 +560,13 @@ export default function App() {
     showTopToast('Missing Posters Generated', `${succeeded} created, ${skipped} skipped`, true);
   }
 
-  function handleBulkGenerate() {
+  async function handleBulkGenerate() {
     if (allRecords.length === 0) {
       showTopToast('No Records Found', 'Collect property records first.', true);
       return;
     }
 
+    await ensurePosterFontsLoaded();
     let skipped = 0;
     let succeeded = 0;
     const newPosters = { ...state.posters };
@@ -524,7 +577,7 @@ export default function App() {
         skipped += 1;
         continue;
       }
-      const dataUrl = renderPortraitPosterDataUrl(rec);
+      const rendered = renderDynamicPoster(rec);
       newPosters[key] = {
         recordId: rec.recordId,
         fileName: buildPosterFileName(rec.category, rec.recordId),
@@ -532,7 +585,9 @@ export default function App() {
         date: rec.date,
         time: rec.time,
         sourceTxtFile: rec.sourceFileName,
-        dataUrl,
+        dataUrl: rendered.dataUrl,
+        width: rendered.width,
+        height: rendered.height,
         createdAt: Date.now() + succeeded,
       };
       succeeded += 1;
@@ -896,7 +951,7 @@ export default function App() {
                       <div className="min-w-0 flex-1">
                         <p className="text-[14px] font-bold">Auto JPG Image by Submit</p>
                         <p className="text-[11.5px] opacity-75">
-                          Automatically generate a 3:4 poster after every submission.
+                          Automatically generate a dynamic-height JPG poster after every submission.
                         </p>
                       </div>
                       <button
@@ -1055,11 +1110,12 @@ export default function App() {
                                       {hasPoster ? 'Poster Ready' : 'Poster Missing'}
                                     </span>
                                     <div className="flex items-center gap-3">
-                                      {!hasPoster ? (
+                                        {!hasPoster ? (
                                         <button
                                           type="button"
-                                          onClick={() => {
-                                            const dataUrl = renderPortraitPosterDataUrl(rec);
+                                          onClick={async () => {
+                                            await ensurePosterFontsLoaded();
+                                            const rendered = renderDynamicPoster(rec);
                                             const entry: PosterEntry = {
                                               recordId: rec.recordId,
                                               fileName: buildPosterFileName(rec.category, rec.recordId),
@@ -1067,7 +1123,9 @@ export default function App() {
                                               date: rec.date,
                                               time: rec.time,
                                               sourceTxtFile: rec.sourceFileName,
-                                              dataUrl,
+                                              dataUrl: rendered.dataUrl,
+                                              width: rendered.width,
+                                              height: rendered.height,
                                               createdAt: Date.now(),
                                             };
                                             setState((prev) => ({
@@ -1131,7 +1189,7 @@ export default function App() {
                           <div className={`space-y-2.5 rounded-2xl border p-4 ${cardSurface}`}>
                             <h3 className="text-sm font-bold">Import Saved TXT Files</h3>
                             <p className="text-xs opacity-75">
-                              Works independently of Auto JPG. Existing valid 3:4 posters are skipped
+                              Works independently of Auto JPG. Existing valid posters are skipped
                               by RECORD_ID without modifying source TXT files.
                             </p>
                             <button
@@ -1238,12 +1296,14 @@ export default function App() {
                                 key={`${poster.category}|${poster.recordId}`}
                                 className={`overflow-hidden rounded-2xl border ${cardSurface}`}
                               >
-                                <img
-                                  src={poster.dataUrl}
-                                  alt={poster.fileName}
-                                  onClick={() => setPreviewPoster(poster)}
-                                  className="aspect-[3/4] max-h-60 w-full cursor-pointer bg-slate-950 object-contain"
-                                />
+                                <div className="bg-slate-100 p-2">
+                                  <img
+                                    src={poster.dataUrl}
+                                    alt={poster.fileName}
+                                    onClick={() => setPreviewPoster(poster)}
+                                    className="mx-auto max-h-72 w-full cursor-pointer rounded object-contain"
+                                  />
+                                </div>
                                 <div className="p-3">
                                   <div className="flex items-center justify-between text-xs font-bold">
                                     <span className="font-mono">{poster.recordId}</span>
@@ -1261,7 +1321,8 @@ export default function App() {
                                   </div>
                                   <p className="mt-0.5 text-[11px] opacity-70">
                                     Date: {poster.date}
-                                    {poster.time ? ` · ${poster.time}` : ''} · {poster.fileName}
+                                    {poster.time ? ` · ${poster.time}` : ''} ·{' '}
+                                    {poster.width ?? 1440}×{poster.height ?? 'auto'}px
                                   </p>
                                   <div className="mt-2.5 grid grid-cols-2 gap-2">
                                     <button
@@ -1272,10 +1333,18 @@ export default function App() {
                                       <Eye className="h-3.5 w-3.5" />
                                       <span>View</span>
                                     </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSharePoster(poster)}
+                                      className="flex items-center justify-center gap-1 rounded-lg bg-[#0B41AD] py-1.5 text-xs font-semibold text-white"
+                                    >
+                                      <Share2 className="h-3.5 w-3.5" />
+                                      <span>Share</span>
+                                    </button>
                                     <a
                                       href={poster.dataUrl}
                                       download={poster.fileName}
-                                      className="flex items-center justify-center gap-1 rounded-lg bg-[#0B41AD] py-1.5 text-xs font-semibold text-white"
+                                      className="flex items-center justify-center gap-1 rounded-lg border border-slate-300 py-1.5 text-xs font-semibold"
                                     >
                                       <Download className="h-3.5 w-3.5" />
                                       <span>Save JPG</span>
@@ -1298,7 +1367,7 @@ export default function App() {
                                           sourceTxtFile: poster.sourceTxtFile,
                                         })
                                       }
-                                      className="flex items-center justify-center gap-1 rounded-lg border border-red-300 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
+                                      className="col-span-2 flex items-center justify-center gap-1 rounded-lg border border-red-300 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50"
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />
                                       <span>Delete</span>
@@ -1335,7 +1404,11 @@ export default function App() {
                               className={`h-9 w-full rounded-lg border px-2 text-xs ${inputSurface}`}
                             >
                               <option value="ALL">All Dates</option>
-                              <option value={activeLocalDate}>{activeLocalDate}</option>
+                              {availableDates.map((d) => (
+                                <option key={d} value={d}>
+                                  {d}
+                                </option>
+                              ))}
                             </select>
                             <label className="flex items-center gap-2 text-xs">
                               <input
@@ -1382,7 +1455,7 @@ export default function App() {
                   </h2>
                   <p className="mt-0.5 text-sm text-slate-600">
                     Simulates the exact Android SAF folder tree, daily TXT records with rich field
-                    runs, 1440×1920 3:4 portrait Canvas posters, and ZIP exports.
+                    runs, dynamic auto-height Canvas posters (1440px wide), and ZIP exports.
                   </p>
                 </div>
                 <button
@@ -1522,17 +1595,18 @@ export default function App() {
         </div>
       </div>
 
-      {/* Full-resolution 3:4 Portrait Poster Modal */}
+      {/* Full-resolution Dynamic Poster Modal */}
       {previewPoster && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-base font-bold text-[#0B1F44]">
                   {previewPoster.recordId} • {previewPoster.fileName}
                 </h3>
                 <p className="text-xs text-slate-500">
-                  1440×1920 (3:4 Portrait) • Offline Canvas Render
+                  {previewPoster.width ?? 1440}×{previewPoster.height ?? 'auto'} Dynamic Poster •
+                  Offline Canvas Render
                 </p>
               </div>
               <button
@@ -1544,11 +1618,13 @@ export default function App() {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <img
-              src={previewPoster.dataUrl}
-              alt={previewPoster.fileName}
-              className="mt-4 aspect-[3/4] max-h-[65vh] w-full rounded-xl border border-slate-200 bg-slate-950 object-contain"
-            />
+            <div className="mt-4 max-h-[68vh] overflow-y-auto rounded-xl border border-slate-200 bg-slate-100 p-2">
+              <img
+                src={previewPoster.dataUrl}
+                alt={previewPoster.fileName}
+                className="h-auto w-full rounded-lg object-contain"
+              />
+            </div>
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
@@ -1556,6 +1632,14 @@ export default function App() {
                 className="h-9 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-700"
               >
                 Close
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSharePoster(previewPoster)}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-4 text-xs font-semibold text-slate-700"
+              >
+                <Share2 className="h-3.5 w-3.5" />
+                <span>Share</span>
               </button>
               <a
                 href={previewPoster.dataUrl}

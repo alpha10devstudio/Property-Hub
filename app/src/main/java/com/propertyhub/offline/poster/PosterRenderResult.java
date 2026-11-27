@@ -8,6 +8,8 @@ public final class PosterRenderResult {
     @Nullable
     private final byte[] jpegBytes;
     private final boolean textOverflowWarning;
+    private final int width;
+    private final int height;
     @Nullable
     private final String errorMessage;
 
@@ -15,20 +17,33 @@ public final class PosterRenderResult {
             boolean success,
             @Nullable byte[] jpegBytes,
             boolean textOverflowWarning,
+            int width,
+            int height,
             @Nullable String errorMessage
     ) {
         this.success = success;
         this.jpegBytes = jpegBytes;
         this.textOverflowWarning = textOverflowWarning;
+        this.width = width;
+        this.height = height;
         this.errorMessage = errorMessage;
     }
 
     public static PosterRenderResult success(byte[] jpegBytes, boolean textOverflowWarning) {
-        return new PosterRenderResult(true, jpegBytes, textOverflowWarning, null);
+        return success(jpegBytes, textOverflowWarning, PosterRenderer.POSTER_WIDTH, 0);
+    }
+
+    public static PosterRenderResult success(
+            byte[] jpegBytes,
+            boolean textOverflowWarning,
+            int width,
+            int height
+    ) {
+        return new PosterRenderResult(true, jpegBytes, textOverflowWarning, width, height, null);
     }
 
     public static PosterRenderResult error(String errorMessage) {
-        return new PosterRenderResult(false, null, false, errorMessage);
+        return new PosterRenderResult(false, null, false, 0, 0, errorMessage);
     }
 
     public boolean isSuccess() {
@@ -42,6 +57,14 @@ public final class PosterRenderResult {
 
     public boolean hasTextOverflowWarning() {
         return textOverflowWarning;
+    }
+
+    public int getWidth() {
+        return width;
+    }
+
+    public int getHeight() {
+        return height;
     }
 
     @Nullable

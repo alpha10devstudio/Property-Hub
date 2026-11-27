@@ -161,12 +161,13 @@ public class PropertyRecord {
                     ordered.add(fv);
                 }
             }
-            if (!ordered.isEmpty()) {
-                return ordered;
-            }
+            return ordered;
         }
 
         // Fallback for legacy TXT records without FIELDS_JSON
+        if (details.trim().isEmpty()) {
+            return Collections.emptyList();
+        }
         List<DetailsParagraphParser.StyledSegment> flat =
                 DetailsParagraphParser.parseInlineFormatting(details.trim());
         String fallbackLabel = category == PropertyCategory.HOUSE_FOR_RENT ? "বর্ণনা" : "জমির তথ্য";

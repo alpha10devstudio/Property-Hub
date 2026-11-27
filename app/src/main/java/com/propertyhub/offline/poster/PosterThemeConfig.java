@@ -8,14 +8,14 @@ import com.propertyhub.offline.model.PropertyCategory;
 import com.propertyhub.offline.model.PropertyFieldCatalog;
 
 /**
- * Category-specific theme, default branding copy, and steady typography configuration
- * shared across the 1440x1920 Portrait DynamicPosterLayoutEngine.
+ * Category-specific visual theme matching Reference Image 1 (Navy House for Rent)
+ * and Reference Image 2 (Dark Green Land for Sale), shared across the dynamic-height poster engine.
  */
 public final class PosterThemeConfig {
 
-    public static final float FIXED_TITLE_FONT_SIZE_PX = 82f;
-    public static final float MIN_TITLE_FONT_SIZE_PX = 54f;
-    public static final float FIXED_CONTACT_FONT_SIZE_PX = 68f;
+    public static final float FIXED_TITLE_FONT_SIZE_PX = 86f;
+    public static final float MIN_TITLE_FONT_SIZE_PX = 52f;
+    public static final float FIXED_CONTACT_FONT_SIZE_PX = 78f;
     public static final float MIN_CONTACT_FONT_SIZE_PX = 42f;
     public static final String CONTACT_PREFIX = "যোগাযোগ: ";
 
@@ -24,6 +24,7 @@ public final class PosterThemeConfig {
 
     private final PropertyCategory category;
     private final String titleText;
+    private final String contactPrefix;
     private final int primaryColor;
     private final int secondaryAccentColor;
     private final int softSurfaceColor;
@@ -38,6 +39,7 @@ public final class PosterThemeConfig {
     private PosterThemeConfig(
             @NonNull PropertyCategory category,
             @NonNull String titleText,
+            @NonNull String contactPrefix,
             int primaryColor,
             int secondaryAccentColor,
             int softSurfaceColor,
@@ -51,6 +53,7 @@ public final class PosterThemeConfig {
     ) {
         this.category = category;
         this.titleText = titleText;
+        this.contactPrefix = contactPrefix;
         this.primaryColor = primaryColor;
         this.secondaryAccentColor = secondaryAccentColor;
         this.softSurfaceColor = softSurfaceColor;
@@ -68,16 +71,17 @@ public final class PosterThemeConfig {
         return new PosterThemeConfig(
                 PropertyCategory.HOUSE_FOR_RENT,
                 HOUSE_TITLE_TEXT,
-                Color.parseColor("#032668"),
+                "যোগাযোগ: ",
+                Color.parseColor("#002868"),
                 Color.parseColor("#1D4ED8"),
                 Color.parseColor("#F3F7FF"),
                 Color.parseColor("#C7D7F2"),
                 Color.WHITE,
-                Color.parseColor("#081C44"),
-                44f,
-                40f,
-                32f,
-                40f
+                Color.parseColor("#002868"),
+                46f,
+                46f,
+                38f,
+                44f
         );
     }
 
@@ -86,16 +90,17 @@ public final class PosterThemeConfig {
         return new PosterThemeConfig(
                 PropertyCategory.LAND_FOR_SALE,
                 LAND_TITLE_TEXT,
-                Color.parseColor("#0B5D2E"),
-                Color.parseColor("#16A34A"),
+                "যোগাযোগঃ ",
+                Color.parseColor("#05661D"),
+                Color.parseColor("#159A38"),
                 Color.parseColor("#EFFBF3"),
                 Color.parseColor("#BCE4C9"),
                 Color.WHITE,
-                Color.parseColor("#063B1D"),
-                32f,
-                26f,
-                22f,
-                26f
+                Color.parseColor("#045718"),
+                42f,
+                44f,
+                34f,
+                44f
         );
     }
 
@@ -118,7 +123,7 @@ public final class PosterThemeConfig {
 
     @NonNull
     public String getContactPrefix() {
-        return CONTACT_PREFIX;
+        return contactPrefix;
     }
 
     public float getFixedTitleFontSizePx() {

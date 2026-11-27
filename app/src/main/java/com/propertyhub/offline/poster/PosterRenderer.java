@@ -15,7 +15,6 @@ import java.io.ByteArrayOutputStream;
 public class PosterRenderer {
 
     public static final int POSTER_WIDTH = 1440;
-    public static final int POSTER_HEIGHT = 1920;
     public static final int JPEG_QUALITY = 92;
 
     @Nullable
@@ -33,14 +32,23 @@ public class PosterRenderer {
     public PosterRenderResult renderPoster(@NonNull PropertyRecord record) {
         Bitmap bitmap = null;
         try {
-            bitmap = Bitmap.createBitmap(POSTER_WIDTH, POSTER_HEIGHT, Bitmap.Config.ARGB_8888);
-            Canvas canvas = new Canvas(bitmap);
-
+            int dynamicHeight;
             boolean overflowed;
+
             if (record.getCategory() == PropertyCategory.HOUSE_FOR_RENT) {
-                overflowed = HousePosterTemplate.render(appContext, canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
+                DynamicPosterLayoutEngine.HouseDynamicPlan plan =
+                        HousePosterTemplate.measurePlan(appContext, record, POSTER_WIDTH);
+                dynamicHeight = Math.max(480, plan.totalHeight);
+                bitmap = Bitmap.createBitmap(POSTER_WIDTH, dynamicHeight, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(bitmap);
+                overflowed = HousePosterTemplate.render(appContext, canvas, record, plan);
             } else {
-                overflowed = LandPosterTemplate.render(appContext, canvas, record, POSTER_WIDTH, POSTER_HEIGHT);
+                DynamicPosterLayoutEngine.LandDynamicPlan plan =
+                        LandPosterTemplate.measurePlan(appContext, record, POSTER_WIDTH);
+                dynamicHeight = Math.max(480, plan.totalHeight);
+                bitmap = Bitmap.createBitmap(POSTER_WIDTH, dynamicHeight, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(bitmap);
+                overflowed = LandPosterTemplate.render(appContext, canvas, record, plan);
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream(384 * 1024);
@@ -48,7 +56,7 @@ public class PosterRenderer {
             if (!compressed) {
                 return PosterRenderResult.error("JPEG compression failed.");
             }
-            return PosterRenderResult.success(out.toByteArray(), overflowed);
+            return PosterRenderResult.success(out.toByteArray(), overflowed, POSTER_WIDTH, dynamicHeight);
         } catch (OutOfMemoryError oom) {
             return PosterRenderResult.error("Insufficient memory to render poster.");
         } catch (Exception e) {

@@ -660,7 +660,11 @@ public class StorageManager {
 
                 for (DocumentFile f : posterDocs) {
                     String name = f.getName();
-                    if (name == null || !isValidPosterFile(f)) {
+                    if (name == null) {
+                        continue;
+                    }
+                    int[] dims = readValidPosterDimensions(f);
+                    if (dims == null) {
                         continue;
                     }
                     PropertyRecord linked = recordByPosterName.get(
@@ -683,6 +687,8 @@ public class StorageManager {
                             sourceTxt,
                             f.getUri(),
                             f.lastModified(),
+                            dims[0],
+                            dims[1],
                             linked
                     ));
                 }
@@ -828,37 +834,50 @@ public class StorageManager {
         }
     }
 
-    public boolean isValidPosterFile(@Nullable DocumentFile file) {
+    @Nullable
+    public int[] readValidPosterDimensions(@Nullable DocumentFile file) {
         if (file == null || !file.exists() || !file.isFile() || file.length() <= 0) {
-            return false;
+            return null;
         }
-        return isValidPosterUri(file.getUri());
+        return readValidPosterDimensionsUri(file.getUri());
+    }
+
+    public boolean isValidPosterFile(@Nullable DocumentFile file) {
+        return readValidPosterDimensions(file) != null;
     }
 
     public boolean isValidPosterUri(@Nullable Uri uri) {
+        return readValidPosterDimensionsUri(uri) != null;
+    }
+
+    @Nullable
+    private int[] readValidPosterDimensionsUri(@Nullable Uri uri) {
         if (uri == null) {
-            return false;
+            return null;
         }
         Bitmap sampled = null;
         try {
             byte[] bytes = readBytesFromUri(uri);
             if (!hasValidJpegMarkers(bytes)) {
-                return false;
+                return null;
             }
             BitmapFactory.Options boundsOpts = new BitmapFactory.Options();
             boundsOpts.inJustDecodeBounds = true;
             BitmapFactory.decodeByteArray(bytes, 0, bytes.length, boundsOpts);
             if (boundsOpts.outWidth <= 0 || boundsOpts.outHeight <= 0) {
-                return false;
+                return null;
             }
 
             BitmapFactory.Options decodeOpts = new BitmapFactory.Options();
             decodeOpts.inSampleSize = 8;
             decodeOpts.inPreferredConfig = Bitmap.Config.RGB_565;
             sampled = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, decodeOpts);
-            return sampled != null && sampled.getWidth() > 0 && sampled.getHeight() > 0;
+            if (sampled != null && sampled.getWidth() > 0 && sampled.getHeight() > 0) {
+                return new int[]{boundsOpts.outWidth, boundsOpts.outHeight};
+            }
+            return null;
         } catch (OutOfMemoryError | Exception e) {
-            return false;
+            return null;
         } finally {
             if (sampled != null && !sampled.isRecycled()) {
                 sampled.recycle();
