@@ -9,7 +9,9 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -60,6 +62,7 @@ public class CategoryFormPageFragment extends Fragment {
 
     private static final String ARG_CATEGORY = "arg_category";
     private static final String STATE_FIELDS_JSON = "state_fields_json";
+    private static final String STATE_USER_EDITED_IDS = "state_user_edited_ids";
     private static final long SUBMIT_DEBOUNCE_MS = 700L;
 
     private PropertyCategory category = PropertyCategory.HOUSE_FOR_RENT;
@@ -71,6 +74,8 @@ public class CategoryFormPageFragment extends Fragment {
 
     private final List<FieldBinding> fieldBindings = new ArrayList<>();
     private final Set<String> activeFieldIds = new HashSet<>();
+    private final Set<String> userEditedFieldIds = new HashSet<>();
+    private final Map<String, boolean[]> pendingStyleByField = new HashMap<>();
     private LinearLayout fieldsContainer;
     private boolean isHouseTheme = true;
     private MaterialButton btnCategorySubmit;
@@ -177,11 +182,16 @@ public class CategoryFormPageFragment extends Fragment {
 
         Map<String, PropertyFieldValue> restoredMap = new HashMap<>();
         Set<String> restoredIds = new HashSet<>();
+        userEditedFieldIds.clear();
         if (savedInstanceState != null) {
             String json = savedInstanceState.getString(STATE_FIELDS_JSON);
             for (PropertyFieldValue fv : PropertyFieldValue.fromJsonArrayString(json)) {
                 restoredMap.put(fv.getFieldId(), fv);
                 restoredIds.add(fv.getFieldId());
+            }
+            ArrayList<String> edited = savedInstanceState.getStringArrayList(STATE_USER_EDITED_IDS);
+            if (edited != null) {
+                userEditedFieldIds.addAll(edited);
             }
         }
 
@@ -220,6 +230,12 @@ public class CategoryFormPageFragment extends Fragment {
         }
         Map<String, PropertyFieldValue> draftSnapshot = new HashMap<>();
         Set<String> previousIds = new HashSet<>(activeFieldIds);
+        for (FieldBinding binding : fieldBindings) {
+            if (binding.richController != null) {
+                RichTextSpannableCodec.StyleState st = binding.richController.getPendingState();
+                pendingStyleByField.put(binding.config.getFieldId(), new boolean[]{st.bold, st.italic});
+            }
+        }
         for (PropertyFieldValue fv : collectFieldValues()) {
             draftSnapshot.put(fv.getFieldId(), fv);
             previousIds.add(fv.getFieldId());
@@ -233,6 +249,7 @@ public class CategoryFormPageFragment extends Fragment {
         if (!fieldBindings.isEmpty()) {
             outState.putString(STATE_FIELDS_JSON, PropertyFieldValue.toJsonArrayString(collectFieldValues()));
         }
+        outState.putStringArrayList(STATE_USER_EDITED_IDS, new ArrayList<>(userEditedFieldIds));
     }
 
     @Override
@@ -340,18 +357,19 @@ public class CategoryFormPageFragment extends Fragment {
 
             configureEditTextInput(editText, cfg, idx == configs.size() - 1);
 
-            boolean wasExistingDraftField = previouslyRenderedIds.contains(cfg.getFieldId());
+            boolean isUserEdited = userEditedFieldIds.contains(cfg.getFieldId());
             PropertyFieldValue restored = restoredMap.get(cfg.getFieldId());
-            if (wasExistingDraftField && restored != null) {
+            if (isUserEdited && restored != null) {
                 if (cfg.supportsFormatting()) {
                     editText.setText(RichTextSpannableCodec.toSpannable(restored.getSegments()));
                 } else {
                     editText.setText(restored.getPlainText());
                 }
-            } else if (!cfg.getDefaultValue().isEmpty()) {
+            } else {
                 editText.setText(cfg.getDefaultValue());
             }
 
+            final String currentFieldId = cfg.getFieldId();
             RichTextSpannableCodec.Controller controller = null;
             if (cfg.supportsFormatting()) {
                 formatControls.setVisibility(View.VISIBLE);
@@ -362,11 +380,29 @@ public class CategoryFormPageFragment extends Fragment {
                     applyFormatToggleVisual(btnBold, state.bold, activeAccent);
                     applyFormatToggleVisual(btnItalic, state.italic, activeAccent);
                 });
-                final RichTextSpannableCodec.Controller finalCtrl = controller;
-                btnBold.setOnClickListener(v -> finalCtrl.toggleBold());
-                btnItalic.setOnClickListener(v -> finalCtrl.toggleItalic());
+                controller.setOnUserContentOrStyleEdited(() -> userEditedFieldIds.add(currentFieldId));
+                controller.bindFormatButtons(btnBold, btnItalic);
+
+                boolean[] savedPending = pendingStyleByField.get(currentFieldId);
+                if (savedPending != null && savedPending.length == 2) {
+                    controller.setPendingState(savedPending[0], savedPending[1]);
+                }
             } else {
                 formatControls.setVisibility(View.GONE);
+                editText.addTextChangedListener(new TextWatcher() {
+                    @Override
+                    public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                    }
+
+                    @Override
+                    public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    }
+
+                    @Override
+                    public void afterTextChanged(Editable s) {
+                        userEditedFieldIds.add(currentFieldId);
+                    }
+                });
             }
 
             if (idx == configs.size() - 1) {
@@ -498,6 +534,8 @@ public class CategoryFormPageFragment extends Fragment {
     }
 
     private void resetFormToDefaults() {
+        userEditedFieldIds.clear();
+        pendingStyleByField.clear();
         if (isAdded() && fieldsContainer != null && host != null) {
             buildDynamicFields(fieldsContainer, isHouseTheme, Collections.emptyMap(), Collections.emptySet());
             return;

@@ -2,11 +2,14 @@ package com.propertyhub.offline.ui;
 
 import android.graphics.Typeface;
 import android.text.Editable;
+import android.text.Selection;
 import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextWatcher;
 import android.text.style.StyleSpan;
+import android.view.MotionEvent;
+import android.view.View;
 import android.widget.EditText;
 
 import androidx.annotation.NonNull;
@@ -122,14 +125,47 @@ public final class RichTextSpannableCodec {
     public static final class Controller {
         private final EditText editText;
         private final StyleStateListener listener;
+        @Nullable
+        private Runnable onUserContentOrStyleEdited;
         private boolean pendingBold = false;
         private boolean pendingItalic = false;
         private boolean internalChange = false;
+        private int touchedSelStart = -1;
+        private int touchedSelEnd = -1;
 
         Controller(@NonNull EditText editText, @NonNull StyleStateListener listener) {
             this.editText = editText;
             this.listener = listener;
             installWatcher();
+        }
+
+        public void setOnUserContentOrStyleEdited(@Nullable Runnable callback) {
+            this.onUserContentOrStyleEdited = callback;
+        }
+
+        public void bindFormatButtons(@NonNull View btnBold, @NonNull View btnItalic) {
+            View.OnTouchListener snapshotTouch = (v, event) -> {
+                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                    snapshotSelection();
+                }
+                return false;
+            };
+            btnBold.setOnTouchListener(snapshotTouch);
+            btnItalic.setOnTouchListener(snapshotTouch);
+            btnBold.setOnClickListener(v -> toggleBold());
+            btnItalic.setOnClickListener(v -> toggleItalic());
+        }
+
+        public void snapshotSelection() {
+            int s = editText.getSelectionStart();
+            int e = editText.getSelectionEnd();
+            if (s >= 0 && e >= 0 && s != e) {
+                touchedSelStart = Math.min(s, e);
+                touchedSelEnd = Math.max(s, e);
+            } else {
+                touchedSelStart = -1;
+                touchedSelEnd = -1;
+            }
         }
 
         public void toggleBold() {
@@ -140,12 +176,25 @@ public final class RichTextSpannableCodec {
             toggleStyle(Typeface.ITALIC);
         }
 
+        @NonNull
+        public StyleState getPendingState() {
+            return new StyleState(pendingBold, pendingItalic);
+        }
+
+        public void setPendingState(boolean bold, boolean italic) {
+            this.pendingBold = bold;
+            this.pendingItalic = italic;
+            syncFromCursor();
+        }
+
+        /**
+         * Updates toolbar state when selection changes WITHOUT auto-disabling the user's
+         * sticky manual Bold/Italic typing toggles.
+         */
         public void syncFromCursor() {
             Editable text = editText.getText();
             if (text == null) {
-                pendingBold = false;
-                pendingItalic = false;
-                listener.onStyleStateChanged(new StyleState(false, false));
+                listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
                 return;
             }
             int selStart = Math.max(0, editText.getSelectionStart());
@@ -155,22 +204,15 @@ public final class RichTextSpannableCodec {
                 listener.onStyleStateChanged(rangeState);
                 return;
             }
-            if (selStart > 0 && selStart <= text.length()) {
-                StyleState charBefore = inspectChar(text, selStart - 1);
-                pendingBold = charBefore.bold;
-                pendingItalic = charBefore.italic;
-            } else if (text.length() == 0) {
-                // Preserve user's pending toggles on an empty field
-            } else {
-                pendingBold = false;
-                pendingItalic = false;
-            }
+            // Collapsed cursor: preserve sticky manual pendingBold / pendingItalic until user turns them off
             listener.onStyleStateChanged(new StyleState(pendingBold, pendingItalic));
         }
 
         public void resetPending() {
             pendingBold = false;
             pendingItalic = false;
+            touchedSelStart = -1;
+            touchedSelEnd = -1;
             listener.onStyleStateChanged(new StyleState(false, false));
         }
 
@@ -183,6 +225,17 @@ public final class RichTextSpannableCodec {
             int selEnd = Math.max(0, editText.getSelectionEnd());
             int start = Math.min(selStart, selEnd);
             int end = Math.max(selStart, selEnd);
+
+            // Rescue selection if Android ActionMode/touch transition collapsed it right before onClick
+            if (start == end
+                    && touchedSelStart >= 0
+                    && touchedSelEnd > touchedSelStart
+                    && touchedSelEnd <= text.length()) {
+                start = touchedSelStart;
+                end = touchedSelEnd;
+            }
+            touchedSelStart = -1;
+            touchedSelEnd = -1;
 
             if (start == end) {
                 if (targetStyle == Typeface.BOLD) {
@@ -201,46 +254,89 @@ public final class RichTextSpannableCodec {
             internalChange = true;
             try {
                 updateRangeStyle(text, start, end, applyBold, enableTarget);
+                if (editText.hasFocus() || editText.requestFocus()) {
+                    Selection.setSelection(text, start, end);
+                }
+                editText.invalidate();
             } finally {
                 internalChange = false;
             }
 
+            if (onUserContentOrStyleEdited != null) {
+                onUserContentOrStyleEdited.run();
+            }
+
             StyleState updated = inspectRange(text, start, end);
-            pendingBold = updated.bold;
-            pendingItalic = updated.italic;
             listener.onStyleStateChanged(updated);
         }
 
         private void installWatcher() {
             editText.addTextChangedListener(new TextWatcher() {
-                private int insertStart = 0;
-                private int insertCount = 0;
+                private String oldReplacedSlice = "";
+                private int changeStart = 0;
+                private int newCount = 0;
 
                 @Override
                 public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-                    insertStart = start;
-                    insertCount = after;
+                    if (internalChange || s == null) {
+                        oldReplacedSlice = "";
+                        return;
+                    }
+                    int safeStart = Math.max(0, Math.min(start, s.length()));
+                    int safeEnd = Math.max(safeStart, Math.min(safeStart + count, s.length()));
+                    oldReplacedSlice = s.subSequence(safeStart, safeEnd).toString();
                 }
 
                 @Override
                 public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    insertStart = start;
-                    insertCount = count;
+                    changeStart = Math.max(0, start);
+                    newCount = Math.max(0, count);
                 }
 
                 @Override
                 public void afterTextChanged(Editable s) {
-                    if (internalChange || s == null || insertCount <= 0) {
+                    if (internalChange || s == null) {
                         return;
                     }
-                    int end = Math.min(s.length(), insertStart + insertCount);
-                    if (end <= insertStart) {
+                    if (onUserContentOrStyleEdited != null) {
+                        onUserContentOrStyleEdited.run();
+                    }
+                    if (newCount <= 0) {
                         return;
                     }
+                    int safeEnd = Math.min(s.length(), changeStart + newCount);
+                    if (safeEnd <= changeStart) {
+                        return;
+                    }
+
+                    // Compute minimal newly inserted range so Bengali IME composing does not overwrite earlier spans
+                    String newSlice = s.subSequence(changeStart, safeEnd).toString();
+                    int oldLen = oldReplacedSlice.length();
+                    int newLen = newSlice.length();
+                    int prefix = 0;
+                    while (prefix < oldLen
+                            && prefix < newLen
+                            && oldReplacedSlice.charAt(prefix) == newSlice.charAt(prefix)) {
+                        prefix++;
+                    }
+                    int suffix = 0;
+                    while (suffix < (oldLen - prefix)
+                            && suffix < (newLen - prefix)
+                            && oldReplacedSlice.charAt(oldLen - 1 - suffix)
+                            == newSlice.charAt(newLen - 1 - suffix)) {
+                        suffix++;
+                    }
+
+                    int applyStart = changeStart + prefix;
+                    int applyEnd = safeEnd - suffix;
+                    if (applyEnd <= applyStart) {
+                        return;
+                    }
+
                     internalChange = true;
                     try {
-                        stripOrSplitSpansInRange(s, insertStart, end);
-                        applyFlags(s, insertStart, end, pendingBold, pendingItalic);
+                        stripOrSplitSpansInRange(s, applyStart, applyEnd);
+                        applyFlags(s, applyStart, applyEnd, pendingBold, pendingItalic);
                     } finally {
                         internalChange = false;
                     }
@@ -253,9 +349,9 @@ public final class RichTextSpannableCodec {
                     syncFromCursor();
                 }
             });
-            editText.setAccessibilityDelegate(new android.view.View.AccessibilityDelegate() {
+            editText.setAccessibilityDelegate(new View.AccessibilityDelegate() {
                 @Override
-                public void sendAccessibilityEvent(@NonNull android.view.View host, int eventType) {
+                public void sendAccessibilityEvent(@NonNull View host, int eventType) {
                     super.sendAccessibilityEvent(host, eventType);
                     if (eventType == android.view.accessibility.AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
                         syncFromCursor();

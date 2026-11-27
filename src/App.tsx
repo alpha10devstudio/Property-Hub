@@ -177,6 +177,10 @@ export default function App() {
   );
   const [houseErrors, setHouseErrors] = useState<Record<string, string>>({});
   const [landErrors, setLandErrors] = useState<Record<string, string>>({});
+  const [houseDirtyFields, setHouseDirtyFields] = useState<Record<string, boolean>>({});
+  const [landDirtyFields, setLandDirtyFields] = useState<Record<string, boolean>>({});
+  const [houseFieldResetTokens, setHouseFieldResetTokens] = useState<Record<string, number>>({});
+  const [landFieldResetTokens, setLandFieldResetTokens] = useState<Record<string, number>>({});
   const [houseResetToken, setHouseResetToken] = useState(0);
   const [landResetToken, setLandResetToken] = useState(0);
   const [submittingCategory, setSubmittingCategory] = useState<CategoryCode | null>(null);
@@ -330,9 +334,33 @@ export default function App() {
     };
     setState(nextState);
     setDefaultDrafts((prev) => ({ ...prev, [fieldId]: value }));
+
+    const isHouse = cat === 'HOUSE_FOR_RENT';
+    const dirtyMap = isHouse ? houseDirtyFields : landDirtyFields;
+    if (!dirtyMap[fieldId]) {
+      const cfg = getFieldsForCategory(
+        cat,
+        nextState.customFields[cat] ?? [],
+        nextOverrides
+      ).find((f) => f.fieldId === fieldId);
+      const nextFieldValue: PropertyFieldValue = {
+        fieldId,
+        label: cfg?.label ?? fieldId,
+        plainText: value,
+        segments: value ? [{ text: value, bold: false, italic: false }] : [],
+      };
+      if (isHouse) {
+        setHouseForm((prev) => ({ ...prev, [fieldId]: nextFieldValue }));
+        setHouseFieldResetTokens((prev) => ({ ...prev, [fieldId]: (prev[fieldId] ?? 0) + 1 }));
+      } else {
+        setLandForm((prev) => ({ ...prev, [fieldId]: nextFieldValue }));
+        setLandFieldResetTokens((prev) => ({ ...prev, [fieldId]: (prev[fieldId] ?? 0) + 1 }));
+      }
+    }
+
     showTopToast(
       isClear ? 'Default Cleared' : 'Default Saved',
-      'Applies to new & reset forms; drafts unchanged.',
+      'Updated untouched form fields; drafts unchanged.',
       cat === 'HOUSE_FOR_RENT'
     );
   }
@@ -349,6 +377,31 @@ export default function App() {
     };
     setState(nextState);
     syncDefaultDraftsForCategory(cat, nextState);
+
+    const isHouse = cat === 'HOUSE_FOR_RENT';
+    const dirtyMap = isHouse ? houseDirtyFields : landDirtyFields;
+    if (!dirtyMap[fieldId]) {
+      const cfg = getFieldsForCategory(
+        cat,
+        nextState.customFields[cat] ?? [],
+        nextOverrides
+      ).find((f) => f.fieldId === fieldId);
+      const restoredDefault = cfg?.defaultValue ?? '';
+      const nextFieldValue: PropertyFieldValue = {
+        fieldId,
+        label: cfg?.label ?? fieldId,
+        plainText: restoredDefault,
+        segments: restoredDefault ? [{ text: restoredDefault, bold: false, italic: false }] : [],
+      };
+      if (isHouse) {
+        setHouseForm((prev) => ({ ...prev, [fieldId]: nextFieldValue }));
+        setHouseFieldResetTokens((prev) => ({ ...prev, [fieldId]: (prev[fieldId] ?? 0) + 1 }));
+      } else {
+        setLandForm((prev) => ({ ...prev, [fieldId]: nextFieldValue }));
+        setLandFieldResetTokens((prev) => ({ ...prev, [fieldId]: (prev[fieldId] ?? 0) + 1 }));
+      }
+    }
+
     showTopToast('Default Reset', 'Restored original preset default.', cat === 'HOUSE_FOR_RENT');
   }
 
@@ -525,9 +578,11 @@ export default function App() {
     // Clear form to effective defaults right after TXT save succeeds (matches Android TXT-first pipeline)
     if (isHouse) {
       setHouseForm(createInitialFormMap('HOUSE_FOR_RENT', catCustom, catOverrides));
+      setHouseDirtyFields({});
       setHouseResetToken((n) => n + 1);
     } else {
       setLandForm(createInitialFormMap('LAND_FOR_SALE', catCustom, catOverrides));
+      setLandDirtyFields({});
       setLandResetToken((n) => n + 1);
     }
 
@@ -930,6 +985,8 @@ export default function App() {
   const currentForm = activeCategory === 'HOUSE_FOR_RENT' ? houseForm : landForm;
   const currentErrors = activeCategory === 'HOUSE_FOR_RENT' ? houseErrors : landErrors;
   const currentResetToken = activeCategory === 'HOUSE_FOR_RENT' ? houseResetToken : landResetToken;
+  const currentFieldResetTokens =
+    activeCategory === 'HOUSE_FOR_RENT' ? houseFieldResetTokens : landFieldResetTokens;
   const manageFieldsList = getFieldsForCategory(
     manageCat,
     state.customFields[manageCat] ?? [],
@@ -1126,14 +1183,20 @@ export default function App() {
                               placeholder={cfg.placeholder}
                               accent={activeCategory === 'HOUSE_FOR_RENT' ? 'blue' : 'green'}
                               value={currentForm[cfg.fieldId]}
-                              resetToken={currentResetToken}
+                              resetToken={currentResetToken + (currentFieldResetTokens[cfg.fieldId] ?? 0)}
                               error={currentErrors[cfg.fieldId]}
                               inputSurfaceClass={inputSurface}
                               onChange={(next) => {
                                 if (activeCategory === 'HOUSE_FOR_RENT') {
                                   setHouseForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
+                                  setHouseDirtyFields((prev) =>
+                                    prev[cfg.fieldId] ? prev : { ...prev, [cfg.fieldId]: true }
+                                  );
                                 } else {
                                   setLandForm((prev) => ({ ...prev, [cfg.fieldId]: next }));
+                                  setLandDirtyFields((prev) =>
+                                    prev[cfg.fieldId] ? prev : { ...prev, [cfg.fieldId]: true }
+                                  );
                                 }
                               }}
                             />
@@ -1735,6 +1798,12 @@ export default function App() {
                   type="button"
                   onClick={() => {
                     setState(DEFAULT_STATE);
+                    setHouseForm(createInitialFormMap('HOUSE_FOR_RENT', [], {}));
+                    setLandForm(createInitialFormMap('LAND_FOR_SALE', [], {}));
+                    setHouseDirtyFields({});
+                    setLandDirtyFields({});
+                    setHouseResetToken((n) => n + 1);
+                    setLandResetToken((n) => n + 1);
                     setSelectedTxtFile(null);
                   }}
                   className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
