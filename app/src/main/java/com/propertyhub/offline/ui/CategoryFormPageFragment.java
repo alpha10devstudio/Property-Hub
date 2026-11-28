@@ -400,16 +400,35 @@ public class CategoryFormPageFragment extends Fragment {
                 applyFormatToggleVisual(btnBold, false, activeAccent);
                 applyFormatToggleVisual(btnItalic, false, activeAccent);
 
+                boolean[] savedPending = pendingStyleByField.get(currentFieldId);
+                if (savedPending == null && host != null) {
+                    savedPending = host.getSettingsManager().getFieldTextStyle(category, currentFieldId);
+                    pendingStyleByField.put(currentFieldId, savedPending);
+                }
+
                 controller = RichTextSpannableCodec.attach(editText, state -> {
+                    boolean[] prev = pendingStyleByField.get(currentFieldId);
+                    boolean changed = prev == null
+                            || prev.length != 2
+                            || prev[0] != state.bold
+                            || prev[1] != state.italic;
                     pendingStyleByField.put(currentFieldId, new boolean[]{state.bold, state.italic});
+                    if (changed && host != null) {
+                        host.getSettingsManager().setFieldTextStyle(
+                                category,
+                                currentFieldId,
+                                state.bold,
+                                state.italic
+                        );
+                    }
                     applyFormatToggleVisual(btnBold, state.bold, activeAccent);
                     applyFormatToggleVisual(btnItalic, state.italic, activeAccent);
                 });
                 controller.setOnUserContentOrStyleEdited(() -> userEditedFieldIds.add(currentFieldId));
                 controller.bindFormatButtons(btnBold, btnItalic);
 
-                boolean[] savedPending = pendingStyleByField.get(currentFieldId);
-                if (savedPending != null && savedPending.length == 2) {
+                if (savedPending != null && savedPending.length == 2
+                        && (savedPending[0] || savedPending[1])) {
                     controller.setPendingState(savedPending[0], savedPending[1]);
                 } else if (isUserEdited && restored != null) {
                     boolean hasBold = false;

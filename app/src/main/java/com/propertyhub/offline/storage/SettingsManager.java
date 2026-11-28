@@ -220,6 +220,34 @@ public class SettingsManager {
             saveCustomFields(category, customOnly);
         }
         setFieldDefaultOverride(category, fieldId, null);
+        setFieldTextStyle(category, fieldId, false, false);
+    }
+
+    @NonNull
+    public synchronized boolean[] getFieldTextStyle(
+            @NonNull PropertyCategory category,
+            @NonNull String fieldId
+    ) {
+        String prefix = "field_style_" + category.name() + "_" + fieldId;
+        boolean bold = prefs.getBoolean(prefix + "_b", false);
+        boolean italic = prefs.getBoolean(prefix + "_i", false);
+        return new boolean[]{bold, italic};
+    }
+
+    public synchronized void setFieldTextStyle(
+            @NonNull PropertyCategory category,
+            @NonNull String fieldId,
+            boolean bold,
+            boolean italic
+    ) {
+        String prefix = "field_style_" + category.name() + "_" + fieldId;
+        SharedPreferences.Editor editor = prefs.edit();
+        if (!bold && !italic) {
+            editor.remove(prefix + "_b").remove(prefix + "_i");
+        } else {
+            editor.putBoolean(prefix + "_b", bold).putBoolean(prefix + "_i", italic);
+        }
+        editor.commit();
     }
 
     @NonNull

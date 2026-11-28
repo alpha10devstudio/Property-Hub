@@ -71,6 +71,7 @@ interface SimulatorState {
   zips: ZipArchiveEntry[];
   customFields: Record<CategoryCode, PropertyFieldConfig[]>;
   defaultOverrides: Record<CategoryCode, Record<string, string>>;
+  stickyFieldStyles: Record<string, { bold: boolean; italic: boolean }>;
 }
 
 const STORAGE_KEY = 'property_hub_offline_v3';
@@ -133,6 +134,7 @@ const DEFAULT_STATE: SimulatorState = {
     HOUSE_FOR_RENT: {},
     LAND_FOR_SALE: {},
   },
+  stickyFieldStyles: {},
 };
 
 function loadInitialSimulatorState(): SimulatorState {
@@ -151,6 +153,7 @@ function loadInitialSimulatorState(): SimulatorState {
           HOUSE_FOR_RENT: parsed.defaultOverrides?.HOUSE_FOR_RENT ?? {},
           LAND_FOR_SALE: parsed.defaultOverrides?.LAND_FOR_SALE ?? {},
         },
+        stickyFieldStyles: parsed.stickyFieldStyles ?? {},
       };
     }
   } catch {
@@ -171,14 +174,16 @@ export default function App() {
     createInitialFormMap(
       'HOUSE_FOR_RENT',
       state.customFields.HOUSE_FOR_RENT,
-      state.defaultOverrides.HOUSE_FOR_RENT
+      state.defaultOverrides.HOUSE_FOR_RENT,
+      state.stickyFieldStyles
     )
   );
   const [landForm, setLandForm] = useState<Record<string, PropertyFieldValue>>(() =>
     createInitialFormMap(
       'LAND_FOR_SALE',
       state.customFields.LAND_FOR_SALE,
-      state.defaultOverrides.LAND_FOR_SALE
+      state.defaultOverrides.LAND_FOR_SALE,
+      state.stickyFieldStyles
     )
   );
   const [houseErrors, setHouseErrors] = useState<Record<string, string>>({});
@@ -187,9 +192,7 @@ export default function App() {
   const [landDirtyFields, setLandDirtyFields] = useState<Record<string, boolean>>({});
   const [houseFieldResetTokens, setHouseFieldResetTokens] = useState<Record<string, number>>({});
   const [landFieldResetTokens, setLandFieldResetTokens] = useState<Record<string, number>>({});
-  const [stickyFieldStyles, setStickyFieldStyles] = useState<
-    Record<string, { bold: boolean; italic: boolean }>
-  >({});
+  const stickyFieldStyles = state.stickyFieldStyles;
   const [houseResetToken, setHouseResetToken] = useState(0);
   const [landResetToken, setLandResetToken] = useState(0);
   const [submittingCategory, setSubmittingCategory] = useState<CategoryCode | null>(null);
@@ -512,10 +515,13 @@ export default function App() {
     const nextCustom = (state.customFields[cat] ?? []).filter((f) => f.fieldId !== fieldId);
     const nextOverrides = { ...(state.defaultOverrides[cat] ?? {}) };
     delete nextOverrides[fieldId];
+    const nextStickyStyles = { ...state.stickyFieldStyles };
+    delete nextStickyStyles[`${cat}|${fieldId}`];
     const nextState: SimulatorState = {
       ...state,
       customFields: { ...state.customFields, [cat]: nextCustom },
       defaultOverrides: { ...state.defaultOverrides, [cat]: nextOverrides },
+      stickyFieldStyles: nextStickyStyles,
     };
     setState(nextState);
     if (cat === 'HOUSE_FOR_RENT') {
@@ -1231,10 +1237,18 @@ export default function App() {
                                 stickyBold={stickyState?.bold ?? false}
                                 stickyItalic={stickyState?.italic ?? false}
                                 onStickyChange={(bold, italic) => {
-                                  setStickyFieldStyles((prev) => ({
-                                    ...prev,
-                                    [stickyKey]: { bold, italic },
-                                  }));
+                                  setState((prev) => {
+                                    const nextStyles = { ...prev.stickyFieldStyles };
+                                    if (!bold && !italic) {
+                                      delete nextStyles[stickyKey];
+                                    } else {
+                                      nextStyles[stickyKey] = { bold, italic };
+                                    }
+                                    return {
+                                      ...prev,
+                                      stickyFieldStyles: nextStyles,
+                                    };
+                                  });
                                   const applyStyleToForm = (
                                     prev: Record<string, PropertyFieldValue>
                                   ): Record<string, PropertyFieldValue> => {
@@ -1875,7 +1889,6 @@ export default function App() {
                     setLandForm(createInitialFormMap('LAND_FOR_SALE', [], {}));
                     setHouseDirtyFields({});
                     setLandDirtyFields({});
-                    setStickyFieldStyles({});
                     setHouseResetToken((n) => n + 1);
                     setLandResetToken((n) => n + 1);
                     setSelectedTxtFile(null);
